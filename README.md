@@ -13,11 +13,19 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 - Equip weapons found on the field. Items held at the end of a battle are kept (shown on the results screen).
 - Enemy AI, a boss, win/lose screens.
 
+## Stage 2: island hub (done)
+- Walkable home island (joystick bottom-left, or tap the ground / a building). Your spirits wander around.
+- Soulwright: create characters by class, name and level (cost grows with level; max = your highest level).
+- Titlesmith: move a title from any character or item onto another (200 Bordin; the target's old title is replaced).
+- Your house: roster, stats, equip/unequip items from storage, release characters.
+- Ferry: set sail to the battle. Your roster and their items come along. After a win you get Bordin, and every weapon held or left on the field goes home. A loss changes nothing.
+- Autosaves to localStorage (`?reset` starts a fresh save).
+- Trader and Archive are placeholders for stage 4.
+
 ## Planned stages
-2. Island hub: walk around, roster, spirit creation by class, NPC buildings.
 3. Stage select map and progression, EXP/levels, saving.
 4. Shop, item inventory, title transfer between items/characters, fusion.
 5. More classes, skills, stages, random dungeons, post-game.
 
 ## Tests
-`NODE_PATH=$(npm root -g) node tests/battle.js` (headless Chromium at 390x800, screenshots in `tests/shots/`).
+`NODE_PATH=$(npm root -g) node tests/battle.js` and `tests/hub.js` (headless Chromium at 390x800, screenshots in `tests/shots/`).

@@ -118,18 +118,10 @@ const SK = {
   steal: {n:'Steal',     t:'steal',rng:32,sp:2},
 };
 
-// Spirits you can confine this battle (later: from your roster on the island).
-const ROSTER = [
-  {name:'Brannoc',cls:'Soldier',lv:4,title:'Sturdy'},
-  {name:'Ysolde', cls:'Archer', lv:3},
-  {name:'Mirelle',cls:'Witch',  lv:3,title:'Sage'},
-  {name:'Tamsin', cls:'Healer', lv:3},
-  {name:'Quill',  cls:'Rogue',  lv:3,title:'Thief'},
-  {name:'Garrow', cls:'Soldier',lv:2},
-  {name:'Pell',   cls:'Witch',  lv:2},
-];
+// Spirits you can confine this battle: your island roster (set in newBattle).
+let ROSTER = [];
 const STAGE = {
-  name:'Mossy Hollow', conf:6,
+  name:'Mossy Hollow', conf:6, reward:600,
   host:{name:'Wren',cls:'Warden',lv:3,x:140,y:340},
   objs:[['tree',105,230,'Hardy'],['rock',180,270,'Sturdy'],['barrel',225,330,'Fierce'],['flower',190,410,'Sage'],
         ['flower',95,410],['rock',250,420],['tree',230,170],['bow',150,300],['sword',280,280,'Swift'],
@@ -180,11 +172,14 @@ function stat(u,k){const {m,flat}=statParts(u,k);return Math.max(1,Math.round(u.
 const maxSP = u => 6 + Math.round(stat(u,'int')*0.6);
 function skills(u){const s=[...CL[u.cls].sk];if(u.held&&OT[u.held.type].skill&&!s.includes(OT[u.held.type].skill))s.push(OT[u.held.type].skill);return s}
 const alive = u => ents.includes(u);
+// Unit from a saved character (roster entry or the Warden); its item comes along.
+function charUnit(c,extra){const u=mkUnit({...c,held:c.item?.type,heldTitle:c.item?.title,...extra});u.rid=c.id;return u}
 
 function newBattle(){
   uid = 1; fx.length = 0;
   ents = [];
-  const h = mkUnit({...STAGE.host,team:'p',host:1});
+  ROSTER = SAVE.roster;
+  const h = charUnit(SAVE.host,{x:STAGE.host.x,y:STAGE.host.y,team:'p',host:1});
   ents.push(h);
   for (const [t,x,y,ti] of STAGE.objs) ents.push(mkObj(t,x,y,ti||''));
   for (const f of STAGE.foes) ents.push(mkUnit({...f,team:'e'}));
@@ -206,8 +201,9 @@ const s2w = (sx,sy) => [(sx-cw/2)/cam.z+cam.x, (sy-ch/2)/cam.z/VS+cam.y];
 function focus(e){camT={x:e.x,y:e.y}}
 
 let pd = null;
-cv.addEventListener('pointerdown', e => {pd={x:e.clientX,y:e.clientY,moved:false};cv.setPointerCapture(e.pointerId)});
+cv.addEventListener('pointerdown', e => {if(MODE==='hub')return hubPtr('down',e);pd={x:e.clientX,y:e.clientY,moved:false};cv.setPointerCapture(e.pointerId)});
 cv.addEventListener('pointermove', e => {
+  if (MODE==='hub') return hubPtr('move',e);
   if (!pd) return;
   const dx=e.clientX-pd.x, dy=e.clientY-pd.y;
   if (!pd.moved && Math.hypot(dx,dy)<8) return;
@@ -215,6 +211,7 @@ cv.addEventListener('pointermove', e => {
   cam.x -= dx/cam.z; cam.y -= dy/cam.z/VS; pd.x=e.clientX; pd.y=e.clientY;
 });
 cv.addEventListener('pointerup', e => {
+  if (MODE==='hub') return hubPtr('up',e);
   if (pd && !pd.moved){const r=cv.getBoundingClientRect();tap(e.clientX-r.left,e.clientY-r.top)}
   pd = null;
 });
@@ -410,12 +407,12 @@ async function throwAt(u,x,y){
   if (ents.includes(e)){const p=findFree(x,y,e,0);if(p){e.x=p[0];e.y=p[1]}}
 }
 function confine(sp,obj){
-  const u = mkUnit({...sp,team:'p',x:obj.x,y:obj.y});
+  const u = charUnit(sp,{team:'p',x:obj.x,y:obj.y});
   u.obj = obj; u.hp = stat(u,'hp'); u.sp = maxSP(u);
   u.turns = OT[obj.type].turns + (obj.title==='Elder'?1:0);
   u.r = 12; u.mvLeft = stat(u,'mv'); u.acted=false;
   ents.splice(ents.indexOf(obj),1); ents.push(u);
-  G.used[sp.name]=1; G.confLeft--; G.stats.confined++;
+  G.used[sp.id]=1; G.confLeft--; G.stats.confined++;
   popup(u.x,u.y,'Confined!','#a8e6ff');
   log(sp.name+' confined into '+(obj.title?obj.title+' ':'')+OT[obj.type].n);
   return u;
@@ -497,6 +494,7 @@ function objInfo(o){
   <div class="mut">A spirit confined here stays <b style="color:var(--ac)">${d.turns+(o.title==='Elder'?1:0)}</b> turns.${d.equip?' Can be equipped (grants '+SK[d.skill].n+').':''}</div>`;
 }
 function ui(){
+  if (MODE==='hub') return hubUI();
   const h=host();
   $('#top').innerHTML = `<span class="chip">${STAGE.name}</span><span class="chip">Turn <b>${G.turn}</b></span>
     <span class="chip">${G.phase==='player'?'Your phase':'Enemy phase'}</span><span class="sp"></span>
@@ -506,7 +504,7 @@ function ui(){
   const P=[], u=G.sel;
   if (G.phase!=='player'){P.push('<div class="mut">Enemy phase…</div>')}
   else if (G.pending){
-    const o=G.pending, sp=G.pendingSpirit, prev=mkUnit({...sp,team:'p'}); prev.obj=o; prev.hp=stat(prev,'hp'); prev.sp=maxSP(prev);
+    const o=G.pending, sp=G.pendingSpirit, prev=charUnit(sp,{team:'p'}); prev.obj=o; prev.hp=stat(prev,'hp'); prev.sp=maxSP(prev);
     P.push(`<div class="mut">Preview: ${sp.name} confined into ${o.title?o.title+' ':''}${OT[o.type].n}</div>`+unitInfo({...prev,turns:OT[o.type].turns+(o.title==='Elder'?1:0)}));
     P.push(`<div class="row"><button class="pri" data-a="doConf">Confine here</button><button data-a="cancel">Pick another</button></div>`);
   }
@@ -557,26 +555,27 @@ $('#panel').addEventListener('click', e => {
 function openRoster(){
   const h=host();
   $('#sheetIn').innerHTML = `<h2>Confine a spirit</h2><div class="mut">${G.confLeft} confines left this battle. Each spirit can be confined once per battle. Pick one, then tap an object within range of ${h.name}.</div>`+
-    ROSTER.map((s,i)=>{const used=G.used[s.name],c=CL[s.cls],tmp=mkUnit({...s,team:'p'});
-      return `<div class="card ${used?'off':''}" data-i="${i}"><div class="ic" style="background:${c.col}"></div><div class="tx"><b>${s.name}</b> <span class="mut">Lv ${s.lv} ${s.cls}</span>${s.title?` <span class="ttl">★ ${s.title}</span>`:''}
+    ROSTER.map((s,i)=>{const used=G.used[s.id],c=CL[s.cls],tmp=charUnit(s,{team:'p'});
+      return `<div class="card ${used?'off':''}" data-i="${i}"><div class="ic" style="background:${c.col}"></div><div class="tx"><b>${s.name}</b> <span class="mut">Lv ${s.lv} ${s.cls}</span>${s.title?` <span class="ttl">★ ${s.title}</span>`:''}${s.item?` <span class="mut">· ${itemName(s.item)}</span>`:''}
       <div class="mut">HP ${stat(tmp,'hp')} · ATK ${stat(tmp,'atk')} · INT ${stat(tmp,'int')} · SPD ${stat(tmp,'spd')} · ${CL[s.cls].sk.map(k=>SK[k].n).join(', ')}</div></div>${used?'<span class="mut">Used</span>':''}</div>`}).join('')+
     `<div class="row"><button data-x="close">Close</button></div>`;
   $('#sheet').classList.add('on');
 }
 $('#sheet').addEventListener('click', e => {
   if (e.target.id==='sheet' || e.target.closest('[data-x=close]')){$('#sheet').classList.remove('on');return}
+  if (MODE==='hub'){const b=e.target.closest('[data-h]');if(b&&!b.disabled)hubAct(b.dataset.h,b.dataset);return}
   const c=e.target.closest('.card'); if(!c||c.classList.contains('off')) return;
   G.pendingSpirit=ROSTER[+c.dataset.i]; G.mode='confObj'; G.pending=null; $('#sheet').classList.remove('on'); ui();
 });
 function showEnd(){
   const win=G.over==='win';
-  const spoils=units('p').filter(u=>u.held).map(u=>`${u.held.title?u.held.title+' ':''}${OT[u.held.type].n}`);
+  const spoils=lootList().map(itemName);
   $('#ovIn').innerHTML = `<h2>${win?'Stage Clear!':'Defeat'}</h2>
     <p>${win?'All foes are gone from '+STAGE.name+'.':'Your Warden has fallen.'}</p>
     <p class="mut">Turns: ${G.turn} · Spirits confined: ${G.stats.confined} · Foes defeated: ${G.stats.defeated} (out of bounds: ${G.stats.ob}) · Items stolen: ${G.stats.stolen}</p>
-    ${win?`<p>Spoils carried home: ${spoils.length?spoils.join(', '):'<span class="mut">nothing — hold items when the battle ends to keep them</span>'}</p>`:''}
-    <div class="row"><button class="pri" id="again">${win?'Play again':'Retry'}</button></div>`;
-  $('#ov').classList.add('on'); $('#again').onclick = newBattle;
+    ${win?`<p>Reward: <b style="color:var(--gd)">${STAGE.reward} Bordin</b></p><p>Spoils carried home: ${spoils.length?spoils.join(', '):'<span class="mut">none</span>'}</p>`:'<p class="mut">Nothing is lost. Your spirits and items are as they were before you set sail.</p>'}
+    <div class="row"><button class="pri" id="again">Return to the island</button></div>`;
+  $('#ov').classList.add('on'); $('#again').onclick = settle;
 }
 function showHelp(){
   $('#ovIn').innerHTML = `<h2>How to play</h2>
@@ -601,6 +600,7 @@ function draw(now){
   cx.setTransform(dpr,0,0,dpr,0,0);
   const g=cx.createLinearGradient(0,0,0,ch);g.addColorStop(0,'#0a0f22');g.addColorStop(1,'#1c1233');cx.fillStyle=g;cx.fillRect(0,0,cw,ch);
   cx.fillStyle='rgba(255,255,255,.5)';for(const[a,b,c]of STARS)cx.fillRect(a*cw,b*ch,1+c,1+c);
+  if (MODE==='hub'){if(H)drawHub(now);return requestAnimationFrame(draw)}
   if (!G) return requestAnimationFrame(draw);
   // island: cliff then top
   polyPath(ISLAND,26);cx.fillStyle='#3a2c26';cx.fill();
@@ -686,6 +686,7 @@ function drawUnit(u,sx,sy,z){
   }
   if (u.held) drawWeapon(u.held.type,sx+12*z*big,sy-14*z,z,false);
   cx.globalAlpha=1;
+  if (u.nobar) return;
   // HP bar + turn badge
   const bw=24*z*big, by=sy-(enemy&&u.cls==='GrubKnight'?40:enemy?32:46)*z;
   cx.fillStyle='rgba(0,0,0,.6)';cx.fillRect(sx-bw/2-1,by-1,bw+2,5);
@@ -696,9 +697,336 @@ function drawUnit(u,sx,sy,z){
 }
 function eyes(sx,sy,z,col){cx.fillStyle=col;cx.beginPath();cx.arc(sx-3.5*z,sy,1.8*z,0,6.283);cx.arc(sx+3.5*z,sy,1.8*z,0,6.283);cx.fill()}
 
+// ===================== SAVE =====================
+const SAVE_KEY = 'pt-save-v1';
+let SAVE, MODE = 'hub';
+function newSave(){
+  const s = {v:1,gold:1500,day:1,nid:1,host:{id:0,name:'Wren',cls:'Warden',lv:3,title:'',item:null},roster:[],items:[]};
+  const add = (name,cls,lv,title='') => s.roster.push({id:s.nid++,name,cls,lv,title,item:null});
+  add('Brannoc','Soldier',4,'Sturdy'); add('Ysolde','Archer',3); add('Mirelle','Witch',3,'Sage'); add('Tamsin','Healer',3); add('Quill','Rogue',3,'Thief');
+  s.items.push({id:s.nid++,type:'sword',title:''});
+  return s;
+}
+function loadSave(){
+  if (/reset/.test(location.search)) return newSave();
+  try {const s=JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.v===1) return s} catch(e) {}
+  return newSave();
+}
+function save(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(SAVE))}catch(e){}}
+const itemName = it => (it.title?it.title+' ':'')+OT[it.type].n;
+const ROSTER_MAX = 20;
+
+// Weapons held by your units or left on the field come home after a win.
+function lootList(){
+  const L = [];
+  for (const u of units('p')) if (u.held) L.push({u, type:u.held.type, title:u.held.title});
+  for (const o of objs()) if (OT[o.type].equip) L.push({type:o.type, title:o.title});
+  return L;
+}
+function settle(){
+  if (G.over==='win'){
+    SAVE.gold += STAGE.reward;
+    SAVE.host.item = null;
+    for (const r of SAVE.roster) if (G.used[r.id]) r.item = null;
+    for (const l of lootList()){
+      const it = {id:SAVE.nid++, type:l.type, title:l.title};
+      const owner = l.u && (l.u.host ? SAVE.host : SAVE.roster.find(r=>r.id===l.u.rid));
+      if (owner && !owner.item) owner.item = it; else SAVE.items.push(it);
+    }
+  }
+  SAVE.day++; save();
+  toHub(BLD.find(b=>b.id==='ferry'));
+}
+function startBattle(){
+  $('#sheet').classList.remove('on');
+  MODE = 'battle'; $('#zoom').style.display = '';
+  newBattle();
+}
+
+// ===================== HUB: ISLAND =====================
+const HUB_POLY = [[30,170],[90,90],[210,70],[330,90],[385,190],[370,320],[290,385],[160,395],[60,350],[25,260]].map(([x,y])=>[x*1.6,y*1.6]);
+const HUB_CENTER = [312,380];
+const BLD = [
+  {id:'soul', n:'Soulwright', what:'Create characters', x:152,y:240, col:'#c79bff', kind:'hut',  hi:'Name a shape, and I will call a spirit into it.'},
+  {id:'trade',n:'Trader',     what:'Shop',              x:464,y:216, col:'#f2c85b', kind:'stall',hi:'Still unpacking my crates. Come back soon!'},
+  {id:'title',n:'Titlesmith', what:'Move titles',       x:528,y:416, col:'#ff9b6b', kind:'forge',hi:'Bring me a title and something to put it on.'},
+  {id:'arch', n:'Archive',    what:'Fusion',            x:112,y:480, col:'#7fd6ff', kind:'tower',hi:'The old books are still being sorted.'},
+  {id:'ferry',n:'Ferry',      what:'Set sail',          x:320,y:576, col:'#8fe3a0', kind:'dock', hi:'Wind is good. Where to, Warden?'},
+  {id:'house',n:'Your house', what:'Roster & items',    x:312,y:336, col:'#f0d27a', kind:'house',hi:'Home. Your spirits rest here between battles.'},
+];
+const door = b => [b.x, b.y+30];
+const HTREES = [[50,215],[150,110],[350,180],[260,330],[120,330],[360,300]].map(([x,y])=>[x*1.6,y*1.6]);
+const HDECOR = Array.from({length:90},(_,i)=>{const a=Math.sin(i*12.9898)*43758.5453,b=Math.sin(i*78.233)*12345.678;return [40+(a-Math.floor(a))*580,110+(b-Math.floor(b))*500,i%3]}).filter(([x,y])=>pip(x,y,HUB_POLY));
+const NAMES = ['Alder','Bryn','Cato','Dessa','Elsin','Fen','Gwyn','Hale','Ivo','Juno','Kestrel','Lark','Mott','Nim','Orin','Pip','Rook','Sable','Tavi','Vale','Wick','Yara','Corra','Dunn'];
+const randomName = () => NAMES[Math.floor(Math.random()*NAMES.length)];
+const CLASS_INFO = {
+  Soldier:{cost:120,d:'Sturdy front line. Cleave knocks foes back.'},
+  Archer: {cost:120,d:'Hits from far away with arrows.'},
+  Witch:  {cost:150,d:'Strong magic. Frost Ring hits an area.'},
+  Healer: {cost:150,d:'Mends allies. Tough against magic.'},
+  Rogue:  {cost:140,d:'Fast mover. Steals held items.'},
+};
+const createCost = (cls,lv) => Math.round(CLASS_INFO[cls].cost*lv*(lv+1)/2);
+const TITLE_COST = 200;
+
+let H = null, HS = {};
+function hubOk(x,y){
+  if (!pip(x,y,HUB_POLY)) return false;
+  for (let a=0;a<6.28;a+=1.57) if (!pip(x+Math.cos(a)*12,y+Math.sin(a)*12,HUB_POLY)) return false;
+  if (BLD.some(b=>dist(x,y,b.x,b.y-4)<26)) return false;
+  return !HTREES.some(([tx,ty])=>dist(x,y,tx,ty)<12);
+}
+function randSpot(near,r){for(let i=0;i<40;i++){const x=near[0]+(Math.random()*2-1)*r,y=near[1]+(Math.random()*2-1)*r;if(hubOk(x,y))return [x,y]}return [...HUB_CENTER]}
+function hubSpirits(){
+  return SAVE.roster.slice(0,12).map(r=>{const [x,y]=randSpot(HUB_CENTER,220);return {r,x,y,tx:x,ty:y,wait:Math.random()*3}});
+}
+function toHub(at){
+  MODE = 'hub';
+  const [x,y] = at ? door(at) : door(BLD.find(b=>b.id==='house'));
+  H = {hero:{x,y,tx:null,ty:null,step:0}, joy:null, pd:null, near:null, open:null, msg:null, info:null, last:0, spirits:hubSpirits()};
+  cam.x = x; cam.y = y;
+  $('#zoom').style.display = 'none'; $('#ov').classList.remove('on'); $('#sheet').classList.remove('on');
+  hubUI();
+}
+function hubStep(dt){
+  const h = H.hero, sp = 150;
+  let vx = 0, vy = 0;
+  if (H.joy){vx=H.joy.dx/45; vy=H.joy.dy/45/VS*0.85}
+  else if (h.tx!=null){
+    const d = dist(h.x,h.y,h.tx,h.ty);
+    if (d<4){h.tx=null; if(H.open){const b=H.open;H.open=null;openBuilding(b)}}
+    else {vx=(h.tx-h.x)/d; vy=(h.ty-h.y)/d}
+  }
+  if (vx||vy){
+    const nx=h.x+vx*sp*dt, ny=h.y+vy*sp*dt;
+    if (hubOk(nx,ny)){h.x=nx;h.y=ny}
+    else if (hubOk(nx,h.y)) h.x=nx;
+    else if (hubOk(h.x,ny)) h.y=ny;
+    else if (h.tx!=null){h.tx=null; if(H.open){const b=H.open;H.open=null;if(dist(h.x,h.y,...door(b))<70)openBuilding(b)}}
+    h.step += dt*10;
+  }
+  const near = BLD.find(b=>dist(h.x,h.y,...door(b))<48) || null;
+  if (near!==H.near){H.near=near; hubUI()}
+  cam.x += (h.x-cam.x)*0.15; cam.y += (h.y-cam.y)*0.15;
+  for (const s of H.spirits){
+    if (s.wait>0){s.wait-=dt;continue}
+    const d = dist(s.x,s.y,s.tx,s.ty);
+    if (d<3){s.wait=1+Math.random()*3;[s.tx,s.ty]=randSpot([s.x,s.y],110);continue}
+    const nx=s.x+(s.tx-s.x)/d*40*dt, ny=s.y+(s.ty-s.y)/d*40*dt;
+    if (hubOk(nx,ny)){s.x=nx;s.y=ny} else {s.tx=s.x;s.ty=s.y}
+  }
+}
+function drawBld(b,sx,sy,k,near){
+  const R=(x,y,w,h,c)=>{cx.fillStyle=c;cx.fillRect(sx+x*k,sy+y*k,w*k,h*k)};
+  const P=(pts,c)=>{cx.fillStyle=c;cx.beginPath();pts.forEach(([x,y],i)=>i?cx.lineTo(sx+x*k,sy+y*k):cx.moveTo(sx+x*k,sy+y*k));cx.closePath();cx.fill()};
+  const C=(x,y,r,c)=>{cx.fillStyle=c;cx.beginPath();cx.arc(sx+x*k,sy+y*k,r*k,0,6.283);cx.fill()};
+  cx.fillStyle='rgba(0,0,0,.25)';cx.beginPath();cx.ellipse(sx,sy+6*k,28*k,9*k,0,0,6.283);cx.fill();
+  const wall=()=>{R(-19,-14,38,22,'#6b4a3a');R(-5,-4,10,12,'#2b1d16')}, roof=()=>P([[-24,-14],[0,-34],[24,-14]],b.col);
+  if (b.kind==='tower'){R(-11,-44,22,52,'#5a6476');P([[-15,-42],[0,-62],[15,-42]],b.col);R(-4,-30,8,9,'#ffe9a0')}
+  else if (b.kind==='dock'){cx.fillStyle='rgba(58,106,154,.6)';cx.beginPath();cx.ellipse(sx,sy+14*k,34*k,6*k,0,0,6.283);cx.fill();R(-30,-2,60,12,'#8a6a40');R(-9,-36,2,34,'#8a6a40');P([[-7,-36],[14,-14],[-7,-14]],'#e8ecf3')}
+  else if (b.kind==='stall'){R(-20,-10,40,18,'#7a5a3a');P([[-24,-10],[24,-10],[18,-24],[-18,-24]],b.col);C(-8,-2,3,'#ff6b6b');C(4,-3,3,'#8fe3a0');C(12,-2,3,'#7fd6ff')}
+  else if (b.kind==='forge'){wall();roof();R(9,-32,8,14,'#555');C(14,-40,5,'rgba(170,170,170,.5)');C(18,-48,4,'rgba(170,170,170,.35)')}
+  else {wall();roof();R(10,-10,6,6,'#ffe9a0')}
+  cx.font=`600 ${Math.round(11*Math.max(k/1.25,.9))}px system-ui`;cx.textAlign='center';cx.lineWidth=3;cx.strokeStyle='#000';
+  cx.strokeText(b.n,sx,sy+24*k);cx.fillStyle=near?'#f2c85b':'#fff';cx.fillText(b.n,sx,sy+24*k);
+}
+function drawHub(now){
+  const dt = H.last ? Math.min(0.05,(now-H.last)/1000) : 0; H.last = now;
+  hubStep(dt);
+  const z = cam.z, k = z*1.25;
+  polyPath(HUB_POLY,26);cx.fillStyle='#3a2c26';cx.fill();
+  polyPath(HUB_POLY,13);cx.fillStyle='#4b392f';cx.fill();
+  polyPath(HUB_POLY);const gg=cx.createLinearGradient(0,w2s(0,110)[1],0,w2s(0,630)[1]);gg.addColorStop(0,'#5b8a44');gg.addColorStop(1,'#456f36');cx.fillStyle=gg;cx.fill();
+  cx.lineWidth=2;cx.strokeStyle='#7fae5a';cx.stroke();
+  for (const [x,y,t] of HDECOR){const[sx,sy]=w2s(x,y);cx.fillStyle=t?'rgba(40,70,30,.35)':'rgba(120,170,80,.35)';cx.beginPath();cx.ellipse(sx,sy,(6+t*4)*z,(3+t*2)*z,0,0,6.283);cx.fill()}
+  // dirt paths from the plaza to each door
+  cx.strokeStyle='rgba(201,180,138,.55)';cx.lineCap='round';cx.lineWidth=14*z;
+  for (const b of BLD){const[x0,y0]=w2s(...HUB_CENTER),[x1,y1]=w2s(...door(b)),[mx,my]=w2s((HUB_CENTER[0]+b.x)/2+20,(HUB_CENTER[1]+b.y+30)/2);cx.beginPath();cx.moveTo(x0,y0);cx.quadraticCurveTo(mx,my,x1,y1);cx.stroke()}
+  cx.lineCap='butt';
+  const list = [];
+  for (const b of BLD) list.push({y:b.y, f:()=>{const[sx,sy]=w2s(b.x,b.y);drawBld(b,sx,sy,k,H.near===b)}});
+  for (const [x,y] of HTREES) list.push({y, f:()=>drawObj({type:'tree'},...w2s(x,y),z)});
+  for (const s of H.spirits) list.push({y:s.y, f:()=>{const[sx,sy]=w2s(s.x,s.y);cx.fillStyle='rgba(0,0,0,.25)';cx.beginPath();cx.ellipse(sx,sy,10*z,5*z,0,0,6.283);cx.fill();
+    drawUnit({k:'unit',team:'p',cls:s.r.cls,r:12,held:null,nobar:1},sx,sy-(s.wait>0?0:Math.abs(Math.sin(now/150+s.x))*2*z),z)}});
+  const h = H.hero;
+  list.push({y:h.y, f:()=>{const[sx,sy]=w2s(h.x,h.y);cx.fillStyle='rgba(0,0,0,.3)';cx.beginPath();cx.ellipse(sx,sy,10*z,5*z,0,0,6.283);cx.fill();
+    const moving = H.joy||h.tx!=null; drawUnit({k:'unit',team:'p',host:true,cls:'Warden',r:12,held:null,nobar:1},sx,sy-(moving?Math.abs(Math.sin(h.step))*3*z:0),z)}});
+  list.sort((a,b)=>a.y-b.y).forEach(o=>o.f());
+  if (h.tx!=null){const[sx,sy]=w2s(h.tx,h.ty);cx.strokeStyle='rgba(255,255,255,.6)';cx.lineWidth=2;cx.beginPath();cx.ellipse(sx,sy,8*z,8*VS*z,0,0,6.283);cx.stroke()}
+  // joystick
+  const j = H.joy, jx = j?j.x0:78, jy = j?j.y0:ch-88;
+  cx.fillStyle='rgba(255,255,255,.08)';cx.strokeStyle='rgba(255,255,255,.2)';cx.lineWidth=1.5;cx.beginPath();cx.arc(jx,jy,48,0,6.283);cx.fill();cx.stroke();
+  cx.fillStyle='rgba(255,255,255,.28)';cx.beginPath();cx.arc(jx+(j?j.dx:0),jy+(j?j.dy:0),20,0,6.283);cx.fill();
+}
+function hubPtr(type,e){
+  const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  if (type==='down'){
+    cv.setPointerCapture(e.pointerId);
+    if (sx<160 && sy>ch-180){H.joy={x0:sx,y0:sy,dx:0,dy:0};H.hero.tx=null;H.open=null}
+    else H.pd={sx,sy,moved:false};
+  } else if (type==='move'){
+    if (H.joy){let dx=sx-H.joy.x0,dy=sy-H.joy.y0;const l=Math.hypot(dx,dy);if(l>45){dx*=45/l;dy*=45/l}H.joy.dx=dx;H.joy.dy=dy}
+    else if (H.pd && Math.hypot(sx-H.pd.sx,sy-H.pd.sy)>8) H.pd.moved=true;
+  } else {
+    if (H.joy) H.joy=null; else if (H.pd && !H.pd.moved) hubTap(sx,sy);
+    H.pd=null;
+  }
+}
+function hubTap(sx,sy){
+  const k = cam.z*1.25;
+  for (const b of BLD.slice().sort((a,b)=>b.y-a.y)){
+    const [bx,by] = w2s(b.x,b.y);
+    if (sx>bx-28*k && sx<bx+28*k && sy>by-60*k && sy<by+28*k){
+      if (dist(H.hero.x,H.hero.y,...door(b))<48){openBuilding(b);return}
+      [H.hero.tx,H.hero.ty] = door(b); H.open = b; H.info=null; hubUI(); return;
+    }
+  }
+  const [wx,wy] = s2w(sx,sy);
+  const s = H.spirits.find(s=>dist(wx,wy,s.x,s.y-14)<18);
+  if (s){H.info=s.r; hubUI(); return}
+  H.info=null; H.open=null;
+  if (pip(wx,wy,HUB_POLY)){H.hero.tx=wx;H.hero.ty=wy}
+  hubUI();
+}
+function hubMsg(s){H.msg=s;hubUI();clearTimeout(hubMsg.t);hubMsg.t=setTimeout(()=>{if(H){H.msg=null;hubUI()}},1800)}
+function hubUI(){
+  $('#top').innerHTML = `<span class="chip">Hollow Isle</span><span class="chip">Day <b>${SAVE.day}</b></span><span class="sp"></span>
+    <span class="chip">Bordin <b>${SAVE.gold.toLocaleString()}</b></span><span class="chip">Spirits <b>${SAVE.roster.length}</b>/${ROSTER_MAX}</span>`;
+  const P = [];
+  if (H.near) P.push(`<div class="hd"><span class="nm">${H.near.n}</span><span class="mut">· ${H.near.what}</span></div><div class="row"><button class="gold" data-h="talk">Talk</button></div>`);
+  else if (H.info){const r=H.info;P.push(`<div class="hd"><span class="nm">${r.name}</span><span class="mut">Lv ${r.lv} ${r.cls}</span>${r.title?`<span class="ttl">★ ${r.title}</span>`:''}</div><div class="mut">${r.item?'Holding '+itemName(r.item)+'. ':''}Resting on the island.</div>`)}
+  else P.push(`<div class="mut">Drag the stick (bottom left) or tap the ground to walk. Tap a building or walk to its door to talk.</div>`);
+  P.push(`<div class="row"><button data-h="roster">Roster</button><button data-h="items">Items</button><button data-h="save">Save</button></div>`);
+  if (H.msg) P.push(`<div class="hint">${H.msg}</div>`);
+  $('#panel').innerHTML = P.join('');
+}
+
+// ===================== HUB: BUILDINGS =====================
+function sheet(b,body){
+  $('#sheetIn').innerHTML = `<h2>${b.n}</h2><div class="mut" style="font-style:italic">“${b.hi}”</div>${body}<div class="row"><button data-x="close">Close</button></div>`;
+  $('#sheet').classList.add('on');
+}
+function openBuilding(b){
+  H.hero.tx=null; H.open=null;
+  if (b.id==='soul'){HS={b,cls:HS.cls||'Soldier',lv:1,name:randomName()};openSoul()}
+  else if (b.id==='title'){HS={b,src:null,dst:null};openTitles()}
+  else if (b.id==='house'){HS={b,sel:null,rel:false};openHouse()}
+  else if (b.id==='ferry'){HS={b};openFerry()}
+  else sheet(b,`<p class="mut">Opens in a later update.</p>`);
+}
+const maxCreateLv = () => Math.max(SAVE.host.lv,...SAVE.roster.map(r=>r.lv));
+function openSoul(){
+  const cost=createCost(HS.cls,HS.lv), full=SAVE.roster.length>=ROSTER_MAX;
+  const prev=charUnit({name:HS.name,cls:HS.cls,lv:HS.lv,title:'',item:null},{team:'p'});
+  const cards=Object.entries(CLASS_INFO).map(([c,i])=>`<div class="card" data-h="cls" data-v="${c}" style="${c===HS.cls?'border-color:var(--gd)':''}"><div class="ic" style="background:${CL[c].col}"></div>
+    <div class="tx"><b>${c}</b> <span class="mut">${CL[c].sk.map(k=>SK[k].n).join(', ')}</span><div class="mut">${i.d}</div></div></div>`).join('');
+  sheet(HS.b,`<div style="margin-top:8px"><b>1. Class</b></div>${cards}
+    <div style="margin-top:10px"><b>2. Name</b></div><div class="row" style="margin-top:4px"><input id="cname" maxlength="12" value="${HS.name}" style="flex:1;background:var(--pn2);color:var(--tx);border:1px solid var(--ln);border-radius:8px;padding:8px;font:inherit"><button data-h="rname">Random</button></div>
+    <div style="margin-top:10px"><b>3. Level</b> <span class="mut">(up to your highest, Lv ${maxCreateLv()})</span></div>
+    <div class="row" style="align-items:center"><button data-h="lv-" ${HS.lv<=1?'disabled':''}>−</button><b style="min-width:50px;text-align:center">Lv ${HS.lv}</b><button data-h="lv+" ${HS.lv>=maxCreateLv()?'disabled':''}>+</button></div>
+    <div class="bars">${bar('HP',stat(prev,'hp'),stat(prev,'hp'),'#6fd38a')}</div>${statGrid(prev)}
+    <div class="row" style="align-items:center"><button class="pri" data-h="create" ${SAVE.gold<cost||full?'disabled':''}>Create for ${cost.toLocaleString()} Bordin</button>
+    <span class="mut">${full?'Roster is full':SAVE.gold<cost?'Not enough Bordin':'You have '+SAVE.gold.toLocaleString()}</span></div>`);
+}
+// Everything that can carry a title: characters, their items, items in storage.
+function titleHolders(){
+  const L=[{lab:`${SAVE.host.name} <span class="mut">Warden</span>`,o:SAVE.host}];
+  for (const r of SAVE.roster) L.push({lab:`${r.name} <span class="mut">Lv ${r.lv} ${r.cls}</span>`,o:r});
+  for (const c of [SAVE.host,...SAVE.roster]) if (c.item) L.push({lab:`${OT[c.item.type].n} <span class="mut">held by ${c.name}</span>`,o:c.item});
+  for (const it of SAVE.items) L.push({lab:`${OT[it.type].n} <span class="mut">in storage</span>`,o:it});
+  return L;
+}
+function openTitles(){
+  const L=titleHolders(); let body='';
+  const row=(h,i,extra='')=>`<div class="card" data-h="${h}" data-i="${i}"><div class="tx">${L[i].lab}${L[i].o.title?` <span class="ttl">★ ${L[i].o.title}</span>`:''}${extra}</div><span class="mut">›</span></div>`;
+  if (!HS.src){
+    const has=L.map((x,i)=>x.o.title?i:-1).filter(i=>i>=0);
+    body=`<p>Pick a title to take. It moves off its owner and onto something new. <span class="mut">Cost ${TITLE_COST} Bordin.</span></p>`+
+      (has.length?has.map(i=>row('tsrc',i,`<div class="mut">${modList(TT[L[i].o.title])}</div>`)).join(''):'<p class="mut">Nothing you own has a title yet. Steal or find titled items in battle.</p>');
+  } else if (!HS.dst){
+    const t=HS.src.title;
+    body=`<p>Move <span class="ttl">★ ${t}</span> (${modList(TT[t])}) onto:</p>`+
+      L.map((x,i)=>x.o===HS.src?'':row('tdst',i,x.o.title?`<div class="mut">Its ★ ${x.o.title} will be replaced</div>`:'')).join('')+`<div class="row"><button data-h="tback">Back</button></div>`;
+  } else {
+    const t=HS.src.title, dl=L.find(x=>x.o===HS.dst).lab, sl=L.find(x=>x.o===HS.src).lab;
+    body=`<p>Move <span class="ttl">★ ${t}</span><br>from ${sl}<br>to ${dl}${HS.dst.title?`<br><span class="dn">Replaces ★ ${HS.dst.title}</span>`:''}</p>
+      <div class="row"><button class="pri" data-h="tmove" ${SAVE.gold<TITLE_COST?'disabled':''}>Move for ${TITLE_COST} Bordin</button><button data-h="tback">Back</button></div>`;
+  }
+  sheet(HS.b,body);
+}
+function openHouse(){
+  const chars=[SAVE.host,...SAVE.roster];
+  let body='';
+  if (HS.sel==null){
+    body=`<div style="margin-top:8px"><b>Characters</b> <span class="mut">${SAVE.roster.length}/${ROSTER_MAX} spirits</span></div>`+
+      chars.map((c,i)=>`<div class="card" data-h="char" data-i="${i}"><div class="ic" style="background:${CL[c.cls].col}"></div><div class="tx"><b>${c.name}</b> <span class="mut">Lv ${c.lv} ${c.cls}</span>${c.title?` <span class="ttl">★ ${c.title}</span>`:''}
+        <div class="mut">${c.item?'Holding '+itemName(c.item):'Empty-handed'}</div></div><span class="mut">›</span></div>`).join('')+
+      `<div style="margin-top:12px"><b>Storage</b></div>`+
+      (SAVE.items.length?SAVE.items.map(it=>`<div class="card"><div class="tx"><b>${OT[it.type].n}</b>${it.title?` <span class="ttl">★ ${it.title}</span>`:''}<div class="mut">${SK[OT[it.type].skill].n} · ${Object.entries(OT[it.type].equip).map(([k,v])=>SL[k]+' +'+v).join(', ')}</div></div></div>`).join(''):'<p class="mut">Empty. Weapons you hold or leave on the field after a win end up here.</p>');
+  } else {
+    const c=chars[HS.sel], u=charUnit(c,{team:'p'});
+    body=`<div style="margin-top:8px">${unitInfo(u)}</div><div class="mut" style="margin-top:4px">Skills: ${skills(u).map(k=>SK[k].n).join(', ')}</div>`;
+    body+=`<div style="margin-top:10px"><b>Item</b></div>`+(c.item?`<div class="row"><span>${itemName(c.item)}</span><button data-h="unequip">Unequip</button></div>`:'')+
+      (SAVE.items.length?`<div class="mut" style="margin-top:6px">${c.item?'Swap for':'Equip'} from storage:</div><div class="row">`+SAVE.items.map((it,i)=>`<button data-h="equip" data-i="${i}">${itemName(it)}</button>`).join('')+'</div>':'');
+    if (c!==SAVE.host) body+=HS.rel?`<div class="hint">Release ${c.name}? They leave the island for good.${c.item?' Their item goes to storage.':''} <div class="row"><button class="warn" data-h="release2">Release</button><button data-h="norel">Keep</button></div></div>`
+      :`<div class="row"><button class="warn" data-h="release">Release…</button></div>`;
+    body+=`<div class="row"><button data-h="hback">Back to list</button></div>`;
+  }
+  sheet(HS.b,body);
+}
+function openFerry(){
+  sheet(HS.b,`<div class="card"><div class="tx"><b>${STAGE.name}</b> <span class="mut">Recommended Lv 3</span>
+    <div class="mut">${STAGE.foes.length} foes including a boss · ${STAGE.conf} confines · Reward ${STAGE.reward} Bordin</div></div></div>
+    <p class="mut">More destinations and the stage map come in a later update.</p>
+    <div class="row"><button class="pri" data-h="sail" ${SAVE.roster.length?'':'disabled'}>Set sail</button></div>`);
+}
+function hubAct(a,d){
+  const chars=[SAVE.host,...SAVE.roster];
+  switch(a){
+    case 'talk': return openBuilding(H.near);
+    case 'roster': case 'items': HS={b:BLD.find(b=>b.id==='house'),sel:null,rel:false}; return openHouse();
+    case 'save': save(); return hubMsg('Game saved.');
+    case 'cls': HS.cls=d.v; return openSoul();
+    case 'rname': HS.name=randomName(); return openSoul();
+    case 'lv-': HS.lv=Math.max(1,HS.lv-1); return openSoul();
+    case 'lv+': HS.lv=Math.min(maxCreateLv(),HS.lv+1); return openSoul();
+    case 'create': {
+      const name=(HS.name||'').trim().slice(0,12), cost=createCost(HS.cls,HS.lv);
+      if (!name){return hubMsg('Give them a name first.')}
+      if (SAVE.gold<cost||SAVE.roster.length>=ROSTER_MAX) return;
+      const r={id:SAVE.nid++,name,cls:HS.cls,lv:HS.lv,title:'',item:null};
+      SAVE.roster.push(r); SAVE.gold-=cost; save();
+      const [x,y]=door(HS.b); H.spirits.push({r,x,y:y+10,tx:x,ty:y+10,wait:0});
+      HS.name=randomName(); openSoul(); return hubMsg(`${name} the ${r.cls} joins your island!`);
+    }
+    case 'tsrc': HS.src=titleHolders()[+d.i].o; return openTitles();
+    case 'tdst': HS.dst=titleHolders()[+d.i].o; return openTitles();
+    case 'tback': if (HS.dst) HS.dst=null; else HS.src=null; return openTitles();
+    case 'tmove': {
+      if (SAVE.gold<TITLE_COST) return;
+      const t=HS.src.title; HS.dst.title=t; HS.src.title=''; SAVE.gold-=TITLE_COST; save();
+      HS.src=HS.dst=null; openTitles(); return hubMsg(`★ ${t} moved.`);
+    }
+    case 'char': HS.sel=+d.i; HS.rel=false; return openHouse();
+    case 'hback': HS.sel=null; return openHouse();
+    case 'unequip': {const c=chars[HS.sel]; SAVE.items.push(c.item); c.item=null; save(); return openHouse()}
+    case 'equip': {const c=chars[HS.sel], it=SAVE.items.splice(+d.i,1)[0]; if(c.item) SAVE.items.push(c.item); c.item=it; save(); return openHouse()}
+    case 'release': HS.rel=true; return openHouse();
+    case 'norel': HS.rel=false; return openHouse();
+    case 'release2': {
+      const c=chars[HS.sel]; if (c.item) SAVE.items.push(c.item);
+      SAVE.roster.splice(SAVE.roster.indexOf(c),1); H.spirits=H.spirits.filter(s=>s.r!==c); save();
+      HS.sel=null; HS.rel=false; openHouse(); return hubMsg(`${c.name} has left the island.`);
+    }
+    case 'sail': return startBattle();
+  }
+}
+$('#panel').addEventListener('click', e => {if(MODE!=='hub')return;const b=e.target.closest('[data-h]');if(b&&!b.disabled)hubAct(b.dataset.h,b.dataset)});
+$('#sheet').addEventListener('input', e => {if(e.target.id==='cname')HS.name=e.target.value});
+
 // ===================== BOOT =====================
 window.addEventListener('resize',()=>{resize()});
-resize(); newBattle(); requestAnimationFrame(draw);
+resize(); SAVE = loadSave(); toHub(); requestAnimationFrame(draw);
 </script>
 </body>
 </html>

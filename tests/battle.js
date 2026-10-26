@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
 const path = require('path');
 const out = process.env.OUT || path.join(__dirname, 'shots');
 require('fs').mkdirSync(out, { recursive: true });
-const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast';
+const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast&reset';
 
 (async () => {
   const b = await chromium.launch();
@@ -13,6 +13,8 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast';
   p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => m.type() === 'error' && errs.push(m.text()));
   await p.goto(url);
+  await p.waitForTimeout(300);
+  await p.evaluate(() => startBattle());
   await p.waitForTimeout(300);
   await p.screenshot({ path: out + '/1-start.png' });
   const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1 } else console.log('ok  ', m) };
@@ -23,7 +25,7 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast';
     document.querySelector('[data-a=confine]').click();
     return document.querySelectorAll('#sheet .card').length;
   });
-  ok(r === 7, 'roster lists 7 spirits');
+  ok(r === 5, 'roster lists the 5 starting spirits');
   await p.click('#sheet .card[data-i="0"]');
   const rockScreen = await p.evaluate(() => { const o = objs().find(o => o.type === 'rock' && o.title === 'Sturdy'); return w2s(o.x, o.y) });
   const box = await p.locator('#cv').boundingBox();
@@ -50,7 +52,7 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast';
 
   // Lift & throw an enemy out of bounds.
   const th = await p.evaluate(async () => {
-    const m = confine(ROSTER[0].name === 'Brannoc' ? ROSTER[5] : ROSTER[5], objs().find(o => o.type === 'tree' && o.title === 'Elder'));
+    const m = confine(ROSTER[3], objs().find(o => o.type === 'tree' && o.title === 'Elder'));
     const bat = units('e').find(e => e.cls === 'Thornbat');
     m.x = bat.x - 20; m.y = bat.y; m.b.atk = 40;
     const before = units('e').length;
@@ -95,7 +97,7 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast';
       const h = host();
       // confine whoever is free into the nearest objects
       for (const s of ROSTER) {
-        if (!G.confLeft || G.used[s.name] || !host()) break;
+        if (!G.confLeft || G.used[s.id] || !host()) break;
         const o = objs().filter(o => !o.liftedBy && dist(h.x, h.y, o.x, o.y) <= CONF_RANGE).sort((a, b) => b.x - a.x)[0];
         if (!o) break;
         confine(s, o);
