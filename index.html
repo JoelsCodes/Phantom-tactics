@@ -17,7 +17,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:14px/1.
 #cv{display:block;width:100%;height:100%;touch-action:none}
 #zoom{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px}
 #zoom button{width:34px;height:34px;border-radius:50%;padding:0;font-size:18px}
-#panel{background:var(--pn);border-top:1px solid var(--ln);padding:8px 10px 12px;min-height:170px;max-height:46%;overflow-y:auto}
+#panel{background:var(--pn);border-top:1px solid var(--ln);padding:8px 10px 12px;height:min(270px,40vh);flex:none;overflow-y:auto}
 button{background:var(--pn2);color:var(--tx);border:1px solid var(--ln);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;cursor:pointer}
 button:active{transform:translateY(1px)}
 button:disabled{opacity:.38;cursor:default}
@@ -53,6 +53,7 @@ h2{margin:0 0 4px;font-size:18px}
 #dock button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;font-size:12px}
 #dock button i{width:20px;height:20px;border-radius:50%;display:block}
 #dock button.near{border-color:var(--gd)}
+.clbl{font:600 11px system-ui;fill:#fff;paint-order:stroke;stroke:#000;stroke-width:3px}
 #log{font-size:11px;color:var(--mut);margin-top:8px;max-height:48px;overflow:hidden}
 </style>
 </head>
@@ -62,6 +63,7 @@ h2{margin:0 0 4px;font-size:18px}
   <div id="wrap">
     <canvas id="cv"></canvas>
     <div id="zoom"><button id="zi">+</button><button id="zo">−</button><button id="zc" title="Center">◎</button></div>
+    <div id="chart" style="position:absolute;inset:0;display:none;z-index:4;background:#173a5a"></div>
     <div id="sheet"><div class="in" id="sheetIn"></div></div>
   </div>
   <div id="panel"></div>
@@ -73,7 +75,7 @@ h2{margin:0 0 4px;font-size:18px}
 // Vertical squash for the 2.5D view.
 const VS = 0.62;
 // Battlefield outline (world units). Anything outside is out of bounds.
-const ISLAND = [[60,120],[160,50],[300,40],[430,70],[520,150],[540,280],[500,400],[400,470],[260,490],[130,450],[60,350],[40,230]];
+const ISLAND1 = [[60,120],[160,50],[300,40],[430,70],[520,150],[540,280],[500,400],[400,470],[260,490],[130,450],[60,350],[40,230]];
 const CONF_RANGE = 130, REACH = 34;
 
 // Object types. mods = % changes a spirit gets when confined into it; turns = how long it can stay.
@@ -122,13 +124,15 @@ const SK = {
   steal: {n:'Steal',     t:'steal',rng:32,sp:2},
 };
 
+let ISLAND = ISLAND1;
+let STAGE;
 // Spirits you can confine this battle: your island roster (set in newBattle).
 let ROSTER = [];
-const STAGE = {
+const STAGE1 = {
   name:'Mossy Hollow', conf:6, reward:600,
   host:{name:'Wren',cls:'Warden',lv:3,x:140,y:340},
   objs:[['tree',105,230,'Hardy'],['rock',180,270,'Sturdy'],['barrel',225,330,'Fierce'],['flower',190,410,'Sage'],
-        ['flower',95,410],['rock',250,420],['tree',230,170],['bow',150,300],['sword',280,280,'Swift'],
+        ['flower',110,400],['rock',250,420],['tree',230,170],['bow',150,300],['sword',280,280,'Swift'],
         ['rock',330,190],['flower',300,350],['barrel',340,420],['tree',410,300,'Elder']],
   foes:[{name:'Mossling',cls:'Mossling',lv:3,x:400,y:180},{name:'Mossling',cls:'Mossling',lv:3,x:430,y:400},
         {name:'Mossling',cls:'Mossling',lv:4,x:470,y:260,title:'Fierce'},{name:'Thornbat',cls:'Thornbat',lv:3,x:480,y:170},
@@ -179,7 +183,8 @@ const alive = u => ents.includes(u);
 // Unit from a saved character (roster entry or the Warden); its item comes along.
 function charUnit(c,extra){const u=mkUnit({...c,held:c.item?.type,heldTitle:c.item?.title,...extra});u.rid=c.id;return u}
 
-function newBattle(){
+function newBattle(st=STAGES[0]){
+  STAGE = st; ISLAND = st.island; DECOR = mkDecor();
   uid = 1; fx.length = 0;
   ents = [];
   ROSTER = SAVE.roster;
@@ -188,7 +193,7 @@ function newBattle(){
   for (const [t,x,y,ti] of STAGE.objs) ents.push(mkObj(t,x,y,ti||''));
   for (const f of STAGE.foes) ents.push(mkUnit({...f,team:'e'}));
   G = {turn:0,phase:'player',confLeft:STAGE.conf,used:{},sel:null,mode:'idle',pending:null,over:null,
-       stats:{confined:0,ob:0,stolen:0,defeated:0},log:[]};
+       stats:{confined:0,ob:0,stolen:0,defeated:0},log:[],exp:{},expDone:0,ups:[]};
   cam.x = h.x+90; cam.y = h.y-40; camT = null;
   $('#ov').classList.remove('on');
   startPlayerPhase();
@@ -327,27 +332,27 @@ function damage(u,n,src){
   popup(u.x,u.y,String(n),'#ffd0d0');
   if (u.hp<=0){
     popup(u.x,u.y-10, u.team==='e'?'Defeated':(u.host?'Down!':'Vanished'), '#ff8080');
-    if (u.team==='e') G.stats.defeated++;
+    if (u.team==='e'){G.stats.defeated++;giveExp(src,u)}
     removeUnit(u, u.team==='e'?'was defeated':(u.host?'fell!':'vanished'));
   }
 }
-async function knock(u,fromX,fromY,kb){
+async function knock(u,fromX,fromY,kb,src){
   if (!kb || !alive(u)) return;
   const d = dist(fromX,fromY,u.x,u.y)||1, nx=u.x+(u.x-fromX)/d*kb, ny=u.y+(u.y-fromY)/d*kb;
   const x0=u.x,y0=u.y;
   if (!inIsland(nx,ny)){
     await tween(260,t=>{u.x=x0+(nx-x0)*t;u.y=y0+(ny-y0)*t});
-    await fallOut(u); return;
+    await fallOut(u,src); return;
   }
   const p = findFree(nx,ny,u,0) || [x0,y0];
   await tween(200,t=>{u.x=x0+(p[0]-x0)*t;u.y=y0+(p[1]-y0)*t});
 }
-async function fallOut(e){
+async function fallOut(e,src){
   popup(e.x,e.y,'OUT OF BOUNDS!','#ffcf5b');
   e.falling = 0;
   await tween(500,t=>{e.falling=t});
   if (e.k==='unit'){
-    if (e.team==='e'){G.stats.ob++;G.stats.defeated++}
+    if (e.team==='e'){G.stats.ob++;G.stats.defeated++;giveExp(src,e)}
     if (e.host){e.hp=0}
     removeUnit(e,'fell out of bounds');
   } else { ents.splice(ents.indexOf(e),1); log(OT[e.type].n+' fell out of bounds') }
@@ -387,7 +392,7 @@ async function useSkill(u,k,tx,ty,target){
     } else {
       if (s.t==='phys' && Math.random()*100 > hitChance(u,t)){popup(t.x,t.y,'Miss','#ccc');continue}
       damage(t,calcDmg(u,t,s),u);
-      if (alive(t)) await knock(t,u.x,u.y,s.kb);
+      if (alive(t)) await knock(t,u.x,u.y,s.kb,u);
     }
   }
   await wait(250);
@@ -404,7 +409,7 @@ async function throwAt(u,x,y){
   await tween(250+d*1.6,t=>{e.x=x0+(x-x0)*t;e.y=y0+(y-y0)*t;e.air=30*(1-t)+Math.sin(t*Math.PI)*40});
   e.air=0;
   log(u.name+' threw '+(e.name||OT[e.type].n));
-  if (!inIsland(x,y)){await fallOut(e);return}
+  if (!inIsland(x,y)){await fallOut(e,u);return}
   // Landing on someone hurts them.
   for (const v of units()) if (v!==e && dist(v.x,v.y,x,y)<v.r+e.r*0.7){damage(v,Math.round(5+e.w*0.4),u)}
   if (e.k==='unit' && alive(e)) damage(e,Math.max(1,Math.round(stat(e,'hp')*0.08)),u);
@@ -499,6 +504,7 @@ function objInfo(o){
 }
 function ui(){
   if (MODE==='hub') return hubUI();
+  if (MODE==='chart') return chartUI();
   const h=host();
   $('#top').innerHTML = `<span class="chip">${STAGE.name}</span><span class="chip">Turn <b>${G.turn}</b></span>
     <span class="chip">${G.phase==='player'?'Your phase':'Enemy phase'}</span><span class="sp"></span>
@@ -574,11 +580,13 @@ $('#sheet').addEventListener('click', e => {
 function showEnd(){
   const win=G.over==='win';
   const spoils=lootList().map(itemName);
+  if (!G.expDone){G.expDone=1;G.ups=applyExp(win)}
+  const expTxt=G.ups.length?'<p>'+G.ups.map(u=>`${u.name} +${u.gain} EXP${u.to>u.from?` <b class="up">Lv ${u.from} → ${u.to}!</b>`:''}`).join('<br>')+'</p>':'';
   $('#ovIn').innerHTML = `<h2>${win?'Stage Clear!':'Defeat'}</h2>
     <p>${win?'All foes are gone from '+STAGE.name+'.':'Your Warden has fallen.'}</p>
     <p class="mut">Turns: ${G.turn} · Spirits confined: ${G.stats.confined} · Foes defeated: ${G.stats.defeated} (out of bounds: ${G.stats.ob}) · Items stolen: ${G.stats.stolen}</p>
-    ${win?`<p>Reward: <b style="color:var(--gd)">${STAGE.reward} Bordin</b></p><p>Spoils carried home: ${spoils.length?spoils.join(', '):'<span class="mut">none</span>'}</p>`:'<p class="mut">Nothing is lost. Your spirits and items are as they were before you set sail.</p>'}
-    <div class="row"><button class="pri" id="again">Return to the island</button></div>`;
+    ${win?`<p>Reward: <b style="color:var(--gd)">${STAGE.reward} Bordin</b></p><p>Spoils carried home: ${spoils.length?spoils.join(', '):'<span class="mut">none</span>'}</p>`:'<p class="mut">Your spirits and items are as they were before you set sail. EXP earned is kept.</p>'}
+    ${expTxt}<div class="row"><button class="pri" id="again">Return to the island</button></div>`;
   $('#ov').classList.add('on'); $('#again').onclick = settle;
 }
 function showHelp(){
@@ -594,7 +602,8 @@ function showHelp(){
 }
 
 // ===================== DRAWING =====================
-const DECOR = Array.from({length:70},(_,i)=>{const a=Math.sin(i*12.9898)*43758.5453,b=Math.sin(i*78.233)*12345.678;return [40+(a-Math.floor(a))*500,40+(b-Math.floor(b))*450,i%3]}).filter(([x,y])=>inIsland(x,y,10));
+const mkDecor = () => Array.from({length:70},(_,i)=>{const a=Math.sin(i*12.9898)*43758.5453,b=Math.sin(i*78.233)*12345.678;return [40+(a-Math.floor(a))*500,40+(b-Math.floor(b))*450,i%3]}).filter(([x,y])=>inIsland(x,y,10));
+let DECOR = mkDecor();
 const STARS = Array.from({length:60},(_,i)=>[(Math.sin(i*3.1)*0.5+0.5),(Math.sin(i*7.7)*0.5+0.5),(i%4)/4]);
 function polyPath(poly,dy=0){cx.beginPath();poly.forEach(([x,y],i)=>{const[sx,sy]=w2s(x,y);i?cx.lineTo(sx,sy+dy*cam.z):cx.moveTo(sx,sy+dy*cam.z)});cx.closePath()}
 function ell(x,y,r,stroke,fill,lw=2,dash){const[sx,sy]=w2s(x,y);cx.beginPath();cx.ellipse(sx,sy,r*cam.z,r*VS*cam.z,0,0,6.283);if(fill){cx.fillStyle=fill;cx.fill()}if(stroke){cx.setLineDash(dash||[]);cx.lineWidth=lw;cx.strokeStyle=stroke;cx.stroke();cx.setLineDash([])}}
@@ -604,12 +613,13 @@ function draw(now){
   cx.setTransform(dpr,0,0,dpr,0,0);
   const g=cx.createLinearGradient(0,0,0,ch);g.addColorStop(0,'#0a0f22');g.addColorStop(1,'#1c1233');cx.fillStyle=g;cx.fillRect(0,0,cw,ch);
   cx.fillStyle='rgba(255,255,255,.5)';for(const[a,b,c]of STARS)cx.fillRect(a*cw,b*ch,1+c,1+c);
+  if (MODE==='chart') return requestAnimationFrame(draw);
   if (MODE==='hub'){if(H)drawHub(now);return requestAnimationFrame(draw)}
   if (!G) return requestAnimationFrame(draw);
   // island: cliff then top
   polyPath(ISLAND,26);cx.fillStyle='#3a2c26';cx.fill();
   polyPath(ISLAND,13);cx.fillStyle='#4b392f';cx.fill();
-  polyPath(ISLAND);const gg=cx.createLinearGradient(0,w2s(0,40)[1],0,w2s(0,490)[1]);gg.addColorStop(0,'#5b8a44');gg.addColorStop(1,'#456f36');cx.fillStyle=gg;cx.fill();
+  polyPath(ISLAND);const gg=cx.createLinearGradient(0,w2s(0,40)[1],0,w2s(0,490)[1]);gg.addColorStop(0,STAGE.ground[0]);gg.addColorStop(1,STAGE.ground[1]);cx.fillStyle=gg;cx.fill();
   cx.lineWidth=2;cx.strokeStyle='#7fae5a';cx.stroke();
   for (const [x,y,t] of DECOR){const[sx,sy]=w2s(x,y);cx.fillStyle=t?'rgba(40,70,30,.35)':'rgba(120,170,80,.35)';cx.beginPath();cx.ellipse(sx,sy,(6+t*4)*cam.z,(3+t*2)*cam.z,0,0,6.283);cx.fill()}
   // range indicators
@@ -701,11 +711,121 @@ function drawUnit(u,sx,sy,z){
 }
 function eyes(sx,sy,z,col){cx.fillStyle=col;cx.beginPath();cx.arc(sx-3.5*z,sy,1.8*z,0,6.283);cx.arc(sx+3.5*z,sy,1.8*z,0,6.283);cx.fill()}
 
+// ===================== STAGES / PROGRESSION =====================
+// Seeded random so a stage always generates the same island.
+function rng(seed){return ()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const TITLE_POOL = ['Sturdy','Fierce','Swift','Sage','Hardy','Elder','Frail','Champion'];
+// Builds an island, scatters objects on the west side and puts foes on the east side.
+function genStage(d){
+  const R = rng(d.seed), pick = a => a[Math.floor(R()*a.length)];
+  const cxp = 290, cyp = 265, island = [];
+  for (let i=0;i<12;i++){const a=i/12*6.283+R()*0.2, r=215+R()*45; island.push([Math.round(cxp+Math.cos(a)*r*1.05),Math.round(cyp+Math.sin(a)*r*0.95)])}
+  const placed = [];
+  const spot = (x0,x1,minD) => {
+    for (let t=0;t<400;t++){
+      const x=x0+R()*(x1-x0), y=cyp-200+R()*400;
+      if (!pip(x,y,island)) continue;
+      let ok=true; for (let a=0;a<6.28;a+=0.785) if(!pip(x+Math.cos(a)*24,y+Math.sin(a)*24,island)) ok=false;
+      if (ok && placed.every(([px,py])=>dist(x,y,px,py)>=minD)){placed.push([x,y]);return [Math.round(x),Math.round(y)]}
+    }
+    return null;
+  };
+  const host = spot(cxp-210,cxp-120,40) || [cxp-150,cyp];
+  const objs = [];
+  const kinds = ['rock','rock','rock','tree','tree','flower','flower','barrel','barrel'];
+  for (let i=0;i<d.objs;i++){const p=spot(cxp-230,cxp+90,42);if(p)objs.push([pick(kinds),p[0],p[1],R()<0.35?pick(TITLE_POOL):''])}
+  for (const w of ['sword','bow','staff'].sort(()=>R()-0.5).slice(0,d.weapons)){const p=spot(cxp-150,cxp+60,40);if(p)objs.push([w,p[0],p[1],R()<0.5?pick(TITLE_POOL):''])}
+  const foes = [];
+  for (let i=0;i<d.foes;i++){
+    const p=spot(cxp+40,cxp+260,38); if(!p) continue;
+    const cls=pick(d.pool), lv=Math.max(1,d.lv-1+Math.floor(R()*3));
+    const f={name:cls==='GrubKnight'?'Grub Knight':cls,cls,lv,x:p[0],y:p[1]};
+    if (R()<0.3) f.title=pick(TITLE_POOL);
+    if (R()<0.25){f.held=pick(['sword','bow','staff']);if(R()<0.5)f.heldTitle=pick(TITLE_POOL)}
+    foes.push(f);
+  }
+  const bp = spot(cxp+120,cxp+270,38);
+  if (bp) foes.push({name:d.boss,cls:'GrubKnight',lv:d.lv+2,x:bp[0],y:bp[1],title:pick(['Champion','Elder','Sturdy']),held:pick(['sword','staff']),heldTitle:pick(TITLE_POOL),boss:1});
+  return {...d, island, host:{x:host[0],y:host[1]}, objs, foes};
+}
+const STAGES = [
+  {...STAGE1, id:'mossy', lv:3, col:'#5b8a44', island:ISLAND1, ground:['#5b8a44','#456f36','#7fae5a']},
+  genStage({id:'salt', name:'Saltreed Shore',  lv:4, conf:6, seed:11, objs:12, weapons:1, foes:6, pool:['Mossling','Thornbat'],                  boss:'Tide Grub',    col:'#c9b48a', ground:['#cdb98d','#a8915f','#e8d8ae']}),
+  genStage({id:'ember',name:'Ember Quarry',    lv:6, conf:6, seed:23, objs:12, weapons:2, foes:7, pool:['Mossling','Thornbat','Hexcap'],         boss:'Cinder Knight',col:'#b0603a', ground:['#9a5a3a','#7a4028','#c07a52']}),
+  genStage({id:'fen',  name:'Gloomwater Fen',  lv:8, conf:7, seed:37, objs:13, weapons:2, foes:7, pool:['Mossling','Hexcap','Thornbat'],         boss:'Bog Warden',   col:'#3f6a5a', ground:['#4a7a66','#2f5246','#6a9a86']}),
+  genStage({id:'bell', name:'Bellmoor Ruins',  lv:10,conf:7, seed:41, objs:13, weapons:2, foes:8, pool:['Hexcap','Thornbat','Mossling','GrubKnight'], boss:'Bell Tyrant', col:'#7a7a8a', ground:['#7f7f8f','#5a5a6a','#a0a0b0']}),
+  genStage({id:'glass',name:'Glasswind Steppe',lv:12,conf:8, seed:53, objs:14, weapons:3, foes:8, pool:['Thornbat','Hexcap','GrubKnight'],       boss:'Gale Lord',    col:'#a7c7d9', ground:['#a7c7d9','#7fa0b5','#d0e6f2']}),
+  genStage({id:'spire',name:'Ashen Spire',     lv:15,conf:8, seed:67, objs:14, weapons:3, foes:9, pool:['Hexcap','GrubKnight','Thornbat','Mossling'], boss:'The Ash King', col:'#5a4a5a', ground:['#5f4f5f','#3e323e','#8a7a8a']}),
+];
+for (const s of STAGES) s.reward = s.reward || s.lv*150;
+const CHAPTERS = [['Chapter 1 · The Near Isles',[0,1,2]],['Chapter 2 · The Grey Reaches',[3,4,5]],['Chapter 3 · The Spire',[6]]];
+const CHART_POS = [[90,560],[230,500],[120,400],[270,320],[120,230],[280,150],[170,70]];
+const unlocked = i => i===0 || !!SAVE.cleared[STAGES[i-1].id];
+
+// EXP: the unit that defeats a foe earns it; everyone who took part gets a bonus on a win.
+const expNeed = lv => Math.round(20*Math.pow(lv,1.5));
+function expFor(src,e){return Math.max(1,Math.round(12*e.lv*(e.boss?3:1)*clamp(1+(e.lv-src.lv)*0.15,0.3,2)))}
+function giveExp(src,e){
+  if (!src || src.team!=='p' || e.team!=='e' || src.rid==null) return;
+  const g = expFor(src,e); G.exp[src.rid] = (G.exp[src.rid]||0)+g;
+  popup(src.x,src.y-16,'+'+g+' EXP','#bfeaff');
+}
+function applyExp(win){
+  const ups = [], bonus = win ? STAGE.lv*8 : 0;
+  for (const id of [0,...Object.keys(G.used).map(Number)]){
+    const c = id===0 ? SAVE.host : SAVE.roster.find(r=>r.id===id);
+    if (!c) continue;
+    const gain = (G.exp[id]||0)+bonus, from = c.lv;
+    c.exp = (c.exp||0)+gain;
+    while (c.exp>=expNeed(c.lv)){c.exp-=expNeed(c.lv);c.lv++}
+    if (gain) ups.push({name:c.name,gain,from,to:c.lv});
+  }
+  if (win) SAVE.cleared[STAGE.id] = 1;
+  save();
+  return ups;
+}
+
+// ===================== SEA CHART =====================
+let C = {sel:0, list:false};
+function openChart(){
+  $('#sheet').classList.remove('on');
+  MODE = 'chart';
+  let sel = 0; STAGES.forEach((s,i)=>{if(unlocked(i))sel=i});
+  C = {sel, list:false};
+  $('#chart').style.display = 'block';
+  chartUI();
+}
+function closeChart(){$('#chart').style.display='none'; MODE='hub'; hubUI()}
+function isleSVG(x,y,r,c,lock){return `<g opacity="${lock?.45:1}"><ellipse cx="${x}" cy="${y+7}" rx="${r}" ry="${r*.5}" fill="#3a2c26"/><ellipse cx="${x}" cy="${y}" rx="${r}" ry="${r*.5}" fill="${c}" stroke="#ffffff33"/><circle cx="${x-r*.3}" cy="${y-6}" r="${r*.18}" fill="#2f6b34"/><circle cx="${x+r*.25}" cy="${y-3}" r="${r*.13}" fill="#2f6b34"/></g>`}
+function chartUI(){
+  $('#top').innerHTML = `<span class="chip">Sea Chart</span><span class="chip">Day <b>${SAVE.day}</b></span><span class="sp"></span><span class="chip">Bordin <b>${SAVE.gold.toLocaleString()}</b></span>`;
+  const status = i => SAVE.cleared[STAGES[i].id] ? '<span class="ttl">★ Cleared</span>' : unlocked(i) ? '<span class="up">New</span>' : '<span class="mut">Locked</span>';
+  if (!C.list){
+    let s = `<svg viewBox="0 0 390 620" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%"><defs><pattern id="wv" width="40" height="20" patternUnits="userSpaceOnUse"><path d="M0,10 q10,-6 20,0 t20,0" stroke="#ffffff10" fill="none"/></pattern></defs><rect x="-400" y="-400" width="1200" height="1400" fill="#173a5a"/><rect x="-400" y="-400" width="1200" height="1400" fill="url(#wv)"/>`;
+    s += isleSVG(300,600,50,'#557f40')+`<text class="clbl" x="300" y="590" text-anchor="middle">Hollow Isle</text>`;
+    let prev = [300,590];
+    CHART_POS.forEach(([x,y],i)=>{s+=`<path d="M${prev[0]},${prev[1]} Q${(prev[0]+x)/2+30},${(prev[1]+y)/2} ${x},${y}" stroke="${unlocked(i)?'#f2e3b8':'#ffffff30'}" stroke-width="2" stroke-dasharray="6 6" fill="none"/>`;prev=[x,y]});
+    CHART_POS.forEach(([x,y],i)=>{const st=STAGES[i], open=unlocked(i);
+      s += `<g data-s="${i}" style="cursor:${open?'pointer':'default'}"><ellipse cx="${x}" cy="${y}" rx="46" ry="34" fill="transparent"/>${isleSVG(x,y,34,st.col,!open)}<text class="clbl" x="${x}" y="${y+30}" text-anchor="middle">${open?st.name:'???'}</text>`+
+        (SAVE.cleared[st.id]?`<text x="${x+30}" y="${y-12}" fill="#f2c85b" font-size="14">★</text>`:'')+'</g>'});
+    const [sx,sy] = CHART_POS[C.sel];
+    s += `<circle cx="${sx}" cy="${sy}" r="44" fill="none" stroke="#f2c85b" stroke-width="2" stroke-dasharray="4 4"/><g transform="translate(${sx-40},${sy+26})"><path d="M-14,0 h28 l-5,8 h-18z" fill="#8a6a40"/><path d="M0,0 v-22 l14,14 h-14" fill="#e8ecf3"/></g>`;
+    $('#chart').innerHTML = s+'</svg>';
+  } else {
+    $('#chart').innerHTML = '<div style="height:100%;overflow:auto;padding:4px 12px 12px">'+CHAPTERS.map(([t,ix])=>`<div style="margin-top:10px;color:var(--gd);font-weight:600;font-size:13px">${t}</div>`+
+      ix.map(i=>{const st=STAGES[i],open=unlocked(i);return `<div class="card ${open?'':'off'}" data-s="${i}" style="${i===C.sel?'border-color:var(--gd)':''}"><div class="ic" style="border-radius:8px;background:${st.col}"></div><div class="tx"><b>${open?st.name:'???'}</b> <span class="mut">Rec. Lv ${st.lv}</span><div>${status(i)}</div></div><span class="mut">›</span></div>`}).join('')).join('')+'</div>';
+  }
+  const st = STAGES[C.sel], top = Math.max(SAVE.host.lv,...SAVE.roster.map(r=>r.lv));
+  $('#panel').innerHTML = `<div class="hd"><span class="nm">${st.name}</span><span class="mut">Rec. Lv ${st.lv}</span>${status(C.sel)}</div>
+    <div class="mut">${st.foes.length} foes incl. a boss · ${st.conf} confines · Reward ${st.reward.toLocaleString()} Bordin · Your best: Lv ${top}</div>
+    <div class="row"><button class="pri" data-h="sail" ${SAVE.roster.length?'':'disabled'}>Set sail</button><button data-h="clist">${C.list?'Chart view':'List view'}</button><button data-h="cback">Back to island</button></div>`;
+}
+
 // ===================== SAVE =====================
 const SAVE_KEY = 'pt-save-v1';
 let SAVE, MODE = 'hub';
 function newSave(){
-  const s = {v:1,gold:1500,day:1,nid:1,host:{id:0,name:'Wren',cls:'Warden',lv:3,title:'',item:null},roster:[],items:[]};
+  const s = {v:1,gold:1500,day:1,nid:1,cleared:{},host:{id:0,name:'Wren',cls:'Warden',lv:3,title:'',item:null},roster:[],items:[]};
   const add = (name,cls,lv,title='') => s.roster.push({id:s.nid++,name,cls,lv,title,item:null});
   add('Brannoc','Soldier',4,'Sturdy'); add('Ysolde','Archer',3); add('Mirelle','Witch',3,'Sage'); add('Tamsin','Healer',3); add('Quill','Rogue',3,'Thief');
   s.items.push({id:s.nid++,type:'sword',title:''});
@@ -713,7 +833,7 @@ function newSave(){
 }
 function loadSave(){
   if (/reset/.test(location.search)) return newSave();
-  try {const s=JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.v===1) return s} catch(e) {}
+  try {const s=JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.v===1){s.cleared=s.cleared||{};return s}} catch(e) {}
   return newSave();
 }
 function save(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(SAVE))}catch(e){}}
@@ -741,10 +861,10 @@ function settle(){
   SAVE.day++; save();
   toHub(BLD.find(b=>b.id==='ferry'));
 }
-function startBattle(){
-  $('#sheet').classList.remove('on');
+function startBattle(st){
+  $('#sheet').classList.remove('on'); $('#chart').style.display='none';
   MODE = 'battle'; $('#zoom').style.display = '';
-  newBattle();
+  newBattle(st);
 }
 
 // ===================== HUB: ISLAND =====================
@@ -916,7 +1036,7 @@ function openBuilding(b){
   if (b.id==='soul'){HS={b,cls:HS.cls||'Soldier',lv:1,name:randomName()};openSoul()}
   else if (b.id==='title'){HS={b,src:null,dst:null};openTitles()}
   else if (b.id==='house'){HS={b,sel:null,rel:false};openHouse()}
-  else if (b.id==='ferry'){HS={b};openFerry()}
+  else if (b.id==='ferry') openChart();
   else sheet(b,`<p class="mut">Opens in a later update.</p>`);
 }
 const maxCreateLv = () => Math.max(SAVE.host.lv,...SAVE.roster.map(r=>r.lv));
@@ -970,7 +1090,7 @@ function openHouse(){
       (SAVE.items.length?SAVE.items.map(it=>`<div class="card"><div class="tx"><b>${OT[it.type].n}</b>${it.title?` <span class="ttl">★ ${it.title}</span>`:''}<div class="mut">${SK[OT[it.type].skill].n} · ${Object.entries(OT[it.type].equip).map(([k,v])=>SL[k]+' +'+v).join(', ')}</div></div></div>`).join(''):'<p class="mut">Empty. Weapons you hold or leave on the field after a win end up here.</p>');
   } else {
     const c=chars[HS.sel], u=charUnit(c,{team:'p'});
-    body=`<div style="margin-top:8px">${unitInfo(u)}</div><div class="mut" style="margin-top:4px">Skills: ${skills(u).map(k=>SK[k].n).join(', ')}</div>`;
+    body=`<div style="margin-top:8px">${unitInfo(u)}<div class="bars">${bar('EXP',c.exp||0,expNeed(c.lv),'#c79bff')}</div></div><div class="mut" style="margin-top:4px">Skills: ${skills(u).map(k=>SK[k].n).join(', ')}</div>`;
     body+=`<div style="margin-top:10px"><b>Item</b></div>`+(c.item?`<div class="row"><span>${itemName(c.item)}</span><button data-h="unequip">Unequip</button></div>`:'')+
       (SAVE.items.length?`<div class="mut" style="margin-top:6px">${c.item?'Swap for':'Equip'} from storage:</div><div class="row">`+SAVE.items.map((it,i)=>`<button data-h="equip" data-i="${i}">${itemName(it)}</button>`).join('')+'</div>':'');
     if (c!==SAVE.host) body+=HS.rel?`<div class="hint">Release ${c.name}? They leave the island for good.${c.item?' Their item goes to storage.':''} <div class="row"><button class="warn" data-h="release2">Release</button><button data-h="norel">Keep</button></div></div>`
@@ -978,12 +1098,6 @@ function openHouse(){
     body+=`<div class="row"><button data-h="hback">Back to list</button></div>`;
   }
   sheet(HS.b,body);
-}
-function openFerry(){
-  sheet(HS.b,`<div class="card"><div class="tx"><b>${STAGE.name}</b> <span class="mut">Recommended Lv 3</span>
-    <div class="mut">${STAGE.foes.length} foes including a boss · ${STAGE.conf} confines · Reward ${STAGE.reward} Bordin</div></div></div>
-    <p class="mut">More destinations and the stage map come in a later update.</p>
-    <div class="row"><button class="pri" data-h="sail" ${SAVE.roster.length?'':'disabled'}>Set sail</button></div>`);
 }
 function hubAct(a,d){
   const chars=[SAVE.host,...SAVE.roster];
@@ -1024,10 +1138,13 @@ function hubAct(a,d){
       SAVE.roster.splice(SAVE.roster.indexOf(c),1); H.spirits=H.spirits.filter(s=>s.r!==c); save();
       HS.sel=null; HS.rel=false; openHouse(); return hubMsg(`${c.name} has left the island.`);
     }
-    case 'sail': return startBattle();
+    case 'sail': return startBattle(STAGES[C.sel]);
+    case 'clist': C.list=!C.list; return chartUI();
+    case 'cback': return closeChart();
   }
 }
-$('#panel').addEventListener('click', e => {if(MODE!=='hub')return;const b=e.target.closest('[data-h]');if(b&&!b.disabled)hubAct(b.dataset.h,b.dataset)});
+$('#panel').addEventListener('click', e => {if(MODE==='battle')return;const b=e.target.closest('[data-h]');if(b&&!b.disabled)hubAct(b.dataset.h,b.dataset)});
+$('#chart').addEventListener('click', e => {const g=e.target.closest('[data-s]');if(!g)return;const i=+g.dataset.s;if(!unlocked(i))return;C.sel=i;chartUI()});
 $('#sheet').addEventListener('input', e => {if(e.target.id==='cname')HS.name=e.target.value});
 
 // ===================== BOOT =====================

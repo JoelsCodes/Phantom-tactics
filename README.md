@@ -23,8 +23,14 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 - Autosaves to localStorage (`?reset` starts a fresh save).
 - Trader and Archive are placeholders for stage 4.
 
+## Stage 3: sea chart and progression (done)
+- Ferry opens a sea chart: 7 stages as islands linked by sailing routes, plus a list view grouped into 3 chapters.
+- Each stage unlocks when the one before it is cleared. Recommended level rises from 3 to 15; reward = level x 150 Bordin.
+- Stages 2-7 are generated from a fixed seed (same island every time): their own shape and ground colour, objects and titles on the west side, foes and a named boss on the east side.
+- EXP: the unit that defeats a foe gets EXP (more for bosses and higher-level foes; knocking or throwing out of bounds counts). On a win, the Warden and every confined spirit also get a bonus. EXP is kept even when you lose.
+- Level-ups show on the results screen; the house shows an EXP bar.
+
 ## Planned stages
-3. Stage select map and progression, EXP/levels, saving.
 4. Shop, item inventory, title transfer between items/characters, fusion.
 5. More classes, skills, stages, random dungeons, post-game.
 
