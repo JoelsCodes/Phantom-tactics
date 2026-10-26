@@ -15,6 +15,7 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 
 ## Stage 2: island hub (done)
 - Walkable home island (joystick bottom-left, or tap the ground / a building). Your spirits wander around.
+- Shortcut dock under the island opens any building with one tap, no walking needed.
 - Soulwright: create characters by class, name and level (cost grows with level; max = your highest level).
 - Titlesmith: move a title from any character or item onto another (200 Bordin; the target's old title is replaced).
 - Your house: roster, stats, equip/unequip items from storage, release characters.

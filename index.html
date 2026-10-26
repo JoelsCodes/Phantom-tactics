@@ -49,6 +49,10 @@ h2{margin:0 0 4px;font-size:18px}
 #ov.on{display:flex}
 #ov .in{background:var(--pn);border:1px solid var(--ln);border-radius:14px;padding:16px;max-width:420px;width:100%;max-height:90%;overflow-y:auto}
 #ov p{margin:6px 0}
+#dock{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+#dock button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;font-size:12px}
+#dock button i{width:20px;height:20px;border-radius:50%;display:block}
+#dock button.near{border-color:var(--gd)}
 #log{font-size:11px;color:var(--mut);margin-top:8px;max-height:48px;overflow:hidden}
 </style>
 </head>
@@ -895,8 +899,9 @@ function hubUI(){
   const P = [];
   if (H.near) P.push(`<div class="hd"><span class="nm">${H.near.n}</span><span class="mut">· ${H.near.what}</span></div><div class="row"><button class="gold" data-h="talk">Talk</button></div>`);
   else if (H.info){const r=H.info;P.push(`<div class="hd"><span class="nm">${r.name}</span><span class="mut">Lv ${r.lv} ${r.cls}</span>${r.title?`<span class="ttl">★ ${r.title}</span>`:''}</div><div class="mut">${r.item?'Holding '+itemName(r.item)+'. ':''}Resting on the island.</div>`)}
-  else P.push(`<div class="mut">Drag the stick (bottom left) or tap the ground to walk. Tap a building or walk to its door to talk.</div>`);
-  P.push(`<div class="row"><button data-h="roster">Roster</button><button data-h="items">Items</button><button data-h="save">Save</button></div>`);
+  else P.push(`<div class="mut">Walk with the stick or tap the ground, or jump straight to a building below.</div>`);
+  P.push('<div id="dock">'+BLD.map(b=>`<button data-h="go" data-v="${b.id}" class="${H.near===b?'near':''}"><i style="background:${b.col}"></i>${b.n}<span class="mut">${b.what}</span></button>`).join('')+'</div>');
+  P.push(`<div class="row"><button data-h="save">Save</button></div>`);
   if (H.msg) P.push(`<div class="hint">${H.msg}</div>`);
   $('#panel').innerHTML = P.join('');
 }
@@ -984,6 +989,7 @@ function hubAct(a,d){
   const chars=[SAVE.host,...SAVE.roster];
   switch(a){
     case 'talk': return openBuilding(H.near);
+    case 'go': return openBuilding(BLD.find(b=>b.id===d.v));
     case 'roster': case 'items': HS={b:BLD.find(b=>b.id==='house'),sel:null,rel:false}; return openHouse();
     case 'save': save(); return hubMsg('Game saved.');
     case 'cls': HS.cls=d.v; return openSoul();
@@ -1026,6 +1032,8 @@ $('#sheet').addEventListener('input', e => {if(e.target.id==='cname')HS.name=e.t
 
 // ===================== BOOT =====================
 window.addEventListener('resize',()=>{resize()});
+// The panel height changes with its content, so re-measure the canvas whenever its box changes.
+if (window.ResizeObserver) new ResizeObserver(()=>resize()).observe(cv);
 resize(); SAVE = loadSave(); toHub(); requestAnimationFrame(draw);
 </script>
 </body>

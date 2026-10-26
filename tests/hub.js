@@ -49,8 +49,10 @@ const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1 } 
   ok(cr.n === 6 && cr.last.name === 'Testy' && cr.last.cls === 'Rogue' && cr.last.lv === 2, 'created Testy, Lv 2 Rogue');
   ok(g0 - cr.gold === 140 * 3, 'creation cost charged (' + (g0 - cr.gold) + ')');
 
-  // Titlesmith: move Sturdy from Brannoc onto the sword in storage.
-  await p.evaluate(() => openBuilding(BLD.find(b => b.id === 'title')));
+  // Titlesmith via the shortcut dock (no walking).
+  await p.click('[data-x=close]');
+  await p.click('#dock [data-v=title]');
+  ok(await p.evaluate(() => HS.b && HS.b.id === 'title'), 'dock button opens the Titlesmith directly');
   const L = await p.evaluate(() => titleHolders().map(x => x.o.title || ''));
   const srcI = await p.evaluate(() => titleHolders().findIndex(x => x.o.name === 'Brannoc'));
   await p.click(`[data-h=tsrc][data-i="${srcI}"]`);
