@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Spirit Tactics</title>
+<style>
+:root{--bg:#121621;--pn:#1d2331;--pn2:#2a3243;--ln:#3a4458;--tx:#e8ecf3;--mut:#98a3b7;--ac:#7fd6ff;--gd:#f2c85b;--rd:#ff6b6b;--gn:#7be08a;--pu:#c79bff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:14px/1.3 system-ui,-apple-system,Segoe UI,sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none}
+#app{display:flex;flex-direction:column;height:100%;max-width:560px;margin:0 auto;position:relative}
+#top{display:flex;gap:6px;padding:8px;align-items:center;background:var(--pn);border-bottom:1px solid var(--ln);font-size:12px;flex-wrap:wrap}
+.chip{background:var(--pn2);padding:4px 8px;border-radius:12px;white-space:nowrap}
+.chip b{color:var(--gd)}
+#top .sp{flex:1}
+#wrap{flex:1;min-height:0;position:relative}
+#cv{display:block;width:100%;height:100%;touch-action:none}
+#zoom{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px}
+#zoom button{width:34px;height:34px;border-radius:50%;padding:0;font-size:18px}
+#panel{background:var(--pn);border-top:1px solid var(--ln);padding:8px 10px 12px;min-height:170px;max-height:46%;overflow-y:auto}
+button{background:var(--pn2);color:var(--tx);border:1px solid var(--ln);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;cursor:pointer}
+button:active{transform:translateY(1px)}
+button:disabled{opacity:.38;cursor:default}
+button.pri{background:#2f5d7a;border-color:#4b89b0}
+button.warn{background:#5a2f3a;border-color:#8a4656}
+button.gold{background:#5b4a1f;border-color:#a3873a}
+.row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.hd{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.hd .nm{font-weight:700;font-size:15px}
+.ttl{color:var(--gd);font-size:12px}
+.mut{color:var(--mut);font-size:12px}
+.bar{height:7px;background:#0d1018;border-radius:4px;overflow:hidden;margin-top:3px}
+.bar i{display:block;height:100%}
+.bars{display:grid;grid-template-columns:28px 1fr 64px;gap:2px 6px;align-items:center;font-size:11px;margin-top:6px}
+.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-top:6px;font-size:11px;text-align:center}
+.stats div{background:var(--pn2);border-radius:6px;padding:3px 0}
+.stats b{display:block;font-size:13px}
+.up{color:var(--gn)}.dn{color:var(--rd)}
+.hint{background:#16304a;border:1px solid #2c5a80;border-radius:8px;padding:6px 8px;font-size:12px;margin-top:6px}
+#sheet{position:absolute;inset:0;background:rgba(6,8,14,.72);display:none;align-items:flex-end;z-index:5}
+#sheet.on{display:flex}
+#sheet .in{background:var(--pn);width:100%;max-height:78%;overflow-y:auto;border-radius:14px 14px 0 0;padding:12px;border-top:1px solid var(--ln)}
+.card{display:flex;gap:10px;align-items:center;background:var(--pn2);border:1px solid var(--ln);border-radius:10px;padding:8px;margin-top:6px}
+.card.off{opacity:.4}
+.card .ic{width:36px;height:36px;border-radius:50%;flex:none;border:2px solid rgba(255,255,255,.25)}
+.card .tx{flex:1;min-width:0}
+h2{margin:0 0 4px;font-size:18px}
+#ov{position:absolute;inset:0;background:rgba(6,8,14,.82);display:none;align-items:center;justify-content:center;z-index:9;padding:20px}
+#ov.on{display:flex}
+#ov .in{background:var(--pn);border:1px solid var(--ln);border-radius:14px;padding:16px;max-width:420px;width:100%;max-height:90%;overflow-y:auto}
+#ov p{margin:6px 0}
+#log{font-size:11px;color:var(--mut);margin-top:8px;max-height:48px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top"></div>
+  <div id="wrap">
+    <canvas id="cv"></canvas>
+    <div id="zoom"><button id="zi">+</button><button id="zo">−</button><button id="zc" title="Center">◎</button></div>
+    <div id="sheet"><div class="in" id="sheetIn"></div></div>
+  </div>
+  <div id="panel"></div>
+  <div id="ov"><div class="in" id="ovIn"></div></div>
+</div>
+<script>
+'use strict';
+// ===================== DATA =====================
+// Vertical squash for the 2.5D view.
+const VS = 0.62;
+// Battlefield outline (world units). Anything outside is out of bounds.
+const ISLAND = [[60,120],[160,50],[300,40],[430,70],[520,150],[540,280],[500,400],[400,470],[260,490],[130,450],[60,350],[40,230]];
+const CONF_RANGE = 130, REACH = 34;
+
+// Object types. mods = % changes a spirit gets when confined into it; turns = how long it can stay.
+const OT = {
+  rock:   {n:'Rock',      mods:{def:.30,res:.10,spd:-.15},         turns:6, w:30, r:13},
+  tree:   {n:'Old Tree',  mods:{hp:.25,atk:.10,mv:-.25},           turns:5, w:60, r:15},
+  flower: {n:'Moonbloom', mods:{int:.30,res:.25,hp:-.20},          turns:3, w:2,  r:8},
+  barrel: {n:'Barrel',    mods:{atk:.20,def:-.10,mv:.10},          turns:4, w:15, r:11},
+  sword:  {n:'Iron Blade',mods:{atk:.25},  turns:4, w:6, r:9,  equip:{atk:14},       skill:'slash'},
+  bow:    {n:'Ash Bow',   mods:{spd:.20,mv:.10}, turns:4, w:5, r:9, equip:{atk:8,spd:6}, skill:'arrow'},
+  staff:  {n:'Oak Staff', mods:{int:.25},  turns:3, w:5, r:9,  equip:{int:14},       skill:'bolt'},
+};
+// Titles: % stat changes. Any unit or object can carry one.
+const TT = {
+  '':{}, Sturdy:{def:.2,res:.1}, Fierce:{atk:.2}, Swift:{spd:.25,mv:.15}, Sage:{int:.25},
+  Hardy:{hp:.25}, Elder:{hp:.1,atk:.1,def:.1,int:.1,res:.1,spd:.1}, Frail:{hp:-.15,def:-.15},
+  Thief:{spd:.15}, Champion:{atk:.3,hp:.2},
+};
+const STATS = ['hp','atk','def','int','res','spd','mv'];
+const SL = {hp:'HP',atk:'ATK',def:'DEF',int:'INT',res:'RES',spd:'SPD',mv:'MOV'};
+
+// Classes. b = base stats at level 1 (mv in world units).
+const CL = {
+  Warden:  {b:{hp:62,atk:8, def:8, int:10,res:10,spd:9, mv:85}, sk:['punch'],        col:'#f0d27a', w:18},
+  Soldier: {b:{hp:70,atk:16,def:12,int:4, res:6, spd:9, mv:80}, sk:['punch','cleave'],col:'#8fb3ff'},
+  Archer:  {b:{hp:50,atk:13,def:7, int:6, res:8, spd:12,mv:85}, sk:['punch','arrow'], col:'#8fe3a0'},
+  Witch:   {b:{hp:42,atk:5, def:5, int:17,res:13,spd:10,mv:75}, sk:['bolt','frost'],  col:'#c79bff'},
+  Healer:  {b:{hp:48,atk:6, def:7, int:14,res:15,spd:9, mv:80}, sk:['punch','heal'],  col:'#f4f1e6'},
+  Rogue:   {b:{hp:48,atk:11,def:7, int:6, res:7, spd:16,mv:105},sk:['punch','steal'], col:'#ffb070'},
+  Mossling:{b:{hp:46,atk:12,def:9, int:4, res:6, spd:8, mv:70}, sk:['punch'],        col:'#6fbf5a'},
+  Thornbat:{b:{hp:32,atk:11,def:5, int:6, res:7, spd:14,mv:110},sk:['spit'],         col:'#9a6bd0'},
+  Hexcap:  {b:{hp:40,atk:6, def:6, int:15,res:12,spd:9, mv:65}, sk:['hex'],          col:'#d0605a'},
+  GrubKnight:{b:{hp:95,atk:15,def:13,int:5,res:9, spd:7, mv:65}, sk:['punch','cleave'],col:'#a07850', w:60, r:16},
+};
+// Skills. pow multiplies ATK (phys) or INT (mag). kb = knockback distance.
+const SK = {
+  punch: {n:'Punch',     t:'phys',pow:1.0,rng:32, sp:0, kb:10},
+  cleave:{n:'Cleave',    t:'phys',pow:1.5,rng:36, sp:4, kb:45},
+  slash: {n:'Slash',     t:'phys',pow:1.3,rng:36, sp:0, kb:15},
+  arrow: {n:'Arrow',     t:'phys',pow:1.0,rng:150,sp:0, kb:0, proj:'#d8c79a'},
+  spit:  {n:'Thorn Spit',t:'phys',pow:0.9,rng:120,sp:0, kb:0, proj:'#9ad06b'},
+  bolt:  {n:'Bolt',      t:'mag', pow:1.3,rng:120,sp:3, kb:0, proj:'#ffe27a'},
+  hex:   {n:'Hex',       t:'mag', pow:1.0,rng:100,sp:2, kb:0, proj:'#ff7a7a'},
+  frost: {n:'Frost Ring',t:'mag', pow:1.0,rng:100,sp:6, kb:0, aoe:45},
+  heal:  {n:'Mend',      t:'heal',pow:1.4,rng:100,sp:3},
+  steal: {n:'Steal',     t:'steal',rng:32,sp:2},
+};
+
+// Spirits you can confine this battle (later: from your roster on the island).
+const ROSTER = [
+  {name:'Brannoc',cls:'Soldier',lv:4,title:'Sturdy'},
+  {name:'Ysolde', cls:'Archer', lv:3},
+  {name:'Mirelle',cls:'Witch',  lv:3,title:'Sage'},
+  {name:'Tamsin', cls:'Healer', lv:3},
+  {name:'Quill',  cls:'Rogue',  lv:3,title:'Thief'},
+  {name:'Garrow', cls:'Soldier',lv:2},
+  {name:'Pell',   cls:'Witch',  lv:2},
+];
+const STAGE = {
+  name:'Mossy Hollow', conf:6,
+  host:{name:'Wren',cls:'Warden',lv:3,x:140,y:340},
+  objs:[['tree',105,230,'Hardy'],['rock',180,270,'Sturdy'],['barrel',225,330,'Fierce'],['flower',190,410,'Sage'],
+        ['flower',95,410],['rock',250,420],['tree',230,170],['bow',150,300],['sword',280,280,'Swift'],
+        ['rock',330,190],['flower',300,350],['barrel',340,420],['tree',410,300,'Elder']],
+  foes:[{name:'Mossling',cls:'Mossling',lv:3,x:400,y:180},{name:'Mossling',cls:'Mossling',lv:3,x:430,y:400},
+        {name:'Mossling',cls:'Mossling',lv:4,x:470,y:260,title:'Fierce'},{name:'Thornbat',cls:'Thornbat',lv:3,x:480,y:170},
+        {name:'Thornbat',cls:'Thornbat',lv:3,x:380,y:440},
+        {name:'Hexcap',cls:'Hexcap',lv:4,x:490,y:330,held:'staff',heldTitle:'Elder'},
+        {name:'Grub Knight',cls:'GrubKnight',lv:5,x:500,y:240,title:'Champion',held:'sword',heldTitle:'Fierce',boss:1}],
+};
+
+// ===================== HELPERS =====================
+const $ = s => document.querySelector(s);
+const dist = (a,b,c,d) => Math.hypot(a-c,b-d);
+const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+const FAST = /fast/.test(location.search) ? 0.05 : 1;
+const wait = ms => new Promise(r => setTimeout(r, ms*FAST));
+function pip(x,y,poly=ISLAND){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const[xi,yi]=poly[i],[xj,yj]=poly[j];if((yi>y)!==(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi)c=!c}return c}
+function inIsland(x,y,m=0){if(!pip(x,y))return false;if(!m)return true;for(let a=0;a<6.28;a+=0.785)if(!pip(x+Math.cos(a)*m,y+Math.sin(a)*m))return false;return true}
+const pct = v => (v>0?'+':'')+Math.round(v*100)+'%';
+
+// ===================== STATE =====================
+let G, ents, uid = 1, busy = false;
+const fx = [];
+const units = t => ents.filter(e => e.k==='unit' && (!t || e.team===t));
+const objs = () => ents.filter(e => e.k==='obj');
+const host = () => ents.find(e => e.host);
+
+function mkObj(type,x,y,title=''){const o=OT[type];return {k:'obj',id:uid++,type,x,y,title,liftedBy:null,r:o.r,w:o.w}}
+function mkUnit(o){
+  const c = CL[o.cls], lvm = 1+(o.lv-1)*0.12, b = {};
+  for (const k of STATS) b[k] = k==='mv' ? c.b[k] : Math.round(c.b[k]*lvm);
+  const u = {k:'unit',id:uid++,team:o.team,name:o.name,cls:o.cls,lv:o.lv,b,title:o.title||'',x:o.x||0,y:o.y||0,
+    held:o.held?mkObj(o.held,0,0,o.heldTitle):null,lift:null,liftedBy:null,obj:null,turns:0,mvLeft:0,acted:false,
+    host:!!o.host,boss:!!o.boss,r:c.r||12,w:c.w||20};
+  u.hp = stat(u,'hp'); u.sp = maxSP(u); return u;
+}
+// Final stat: base × (1 + object mods + object title + own title + held item title) + held item flat bonus.
+function statParts(u,k){
+  let m = 0;
+  if (u.obj) m += (OT[u.obj.type].mods[k]||0) + (TT[u.obj.title][k]||0);
+  m += TT[u.title][k]||0;
+  if (u.held) m += TT[u.held.title][k]||0;
+  const flat = u.held ? (OT[u.held.type].equip?.[k]||0) : 0;
+  return {m, flat};
+}
+function stat(u,k){const {m,flat}=statParts(u,k);return Math.max(1,Math.round(u.b[k]*(1+m)+flat))}
+const maxSP = u => 6 + Math.round(stat(u,'int')*0.6);
+function skills(u){const s=[...CL[u.cls].sk];if(u.held&&OT[u.held.type].skill&&!s.includes(OT[u.held.type].skill))s.push(OT[u.held.type].skill);return s}
+const alive = u => ents.includes(u);
+
+function newBattle(){
+  uid = 1; fx.length = 0;
+  ents = [];
+  const h = mkUnit({...STAGE.host,team:'p',host:1});
+  ents.push(h);
+  for (const [t,x,y,ti] of STAGE.objs) ents.push(mkObj(t,x,y,ti||''));
+  for (const f of STAGE.foes) ents.push(mkUnit({...f,team:'e'}));
+  G = {turn:0,phase:'player',confLeft:STAGE.conf,used:{},sel:null,mode:'idle',pending:null,over:null,
+       stats:{confined:0,ob:0,stolen:0,defeated:0},log:[]};
+  cam.x = h.x+90; cam.y = h.y-40; camT = null;
+  $('#ov').classList.remove('on');
+  startPlayerPhase();
+}
+function log(s){G.log.unshift(s);G.log.length=Math.min(G.log.length,6)}
+
+// ===================== CAMERA / INPUT =====================
+const cv = $('#cv'), cx = cv.getContext('2d');
+let cw=0, ch=0, dpr=1;
+const cam = {x:290,y:280,z:1}; let camT = null;
+function resize(){dpr=devicePixelRatio||1;const r=cv.getBoundingClientRect();cw=r.width;ch=r.height;cv.width=cw*dpr;cv.height=ch*dpr;cam.z=clamp(cw/340,0.8,1.6)}
+const w2s = (x,y,h=0) => [(x-cam.x)*cam.z+cw/2, ((y-cam.y)*VS-h)*cam.z+ch/2];
+const s2w = (sx,sy) => [(sx-cw/2)/cam.z+cam.x, (sy-ch/2)/cam.z/VS+cam.y];
+function focus(e){camT={x:e.x,y:e.y}}
+
+let pd = null;
+cv.addEventListener('pointerdown', e => {pd={x:e.clientX,y:e.clientY,moved:false};cv.setPointerCapture(e.pointerId)});
+cv.addEventListener('pointermove', e => {
+  if (!pd) return;
+  const dx=e.clientX-pd.x, dy=e.clientY-pd.y;
+  if (!pd.moved && Math.hypot(dx,dy)<8) return;
+  pd.moved = true; camT = null;
+  cam.x -= dx/cam.z; cam.y -= dy/cam.z/VS; pd.x=e.clientX; pd.y=e.clientY;
+});
+cv.addEventListener('pointerup', e => {
+  if (pd && !pd.moved){const r=cv.getBoundingClientRect();tap(e.clientX-r.left,e.clientY-r.top)}
+  pd = null;
+});
+cv.addEventListener('wheel', e => {e.preventDefault();cam.z=clamp(cam.z*(e.deltaY<0?1.1:0.9),0.5,2.5)},{passive:false});
+$('#zi').onclick = () => cam.z = clamp(cam.z*1.2,0.5,2.5);
+$('#zo').onclick = () => cam.z = clamp(cam.z/1.2,0.5,2.5);
+$('#zc').onclick = () => {const s=G.sel||host();if(s)focus(s)};
+
+// Entity under a world point. Units are drawn standing up, so also test above their feet.
+function pick(wx,wy){
+  let best=null, bd=1e9;
+  for (const e of ents){
+    if (e.liftedBy) continue;
+    const d = Math.min(dist(wx,wy,e.x,e.y), e.k==='unit' ? dist(wx,wy,e.x,e.y-26) : 1e9);
+    if (d < e.r+10 && d < bd){bd=d;best=e}
+  }
+  return best;
+}
+function findFree(x,y,self,m=8){
+  const ok=(px,py)=>inIsland(px,py,m)&&!ents.some(o=>o!==self&&!o.liftedBy&&o!==self?.lift&&dist(px,py,o.x,o.y)<(o.r+(self?.r||12))*0.8);
+  if (ok(x,y)) return [x,y];
+  for (let r=8;r<=60;r+=8) for (let a=0;a<6.28;a+=0.5){const px=x+Math.cos(a)*r,py=y+Math.sin(a)*r;if(ok(px,py))return [px,py]}
+  return null;
+}
+
+// ===================== ANIMATION =====================
+const anims = [];
+function tween(ms,f){return new Promise(res=>{anims.push({t0:performance.now(),ms:Math.max(1,ms*FAST),f,res})})}
+function popup(x,y,s,col='#fff'){fx.push({type:'txt',x,y,s,col,t0:performance.now(),ms:1000*Math.max(FAST,.3)})}
+async function banner(s){G.banner={s,t0:performance.now()};await wait(900);G.banner=null}
+
+// ===================== PHASES =====================
+function startPlayerPhase(){
+  G.phase='player'; G.turn++;
+  for (const u of units('p')){
+    if (!u.host && G.turn>1){
+      u.turns--;
+      if (u.turns<=0){removeUnit(u,'returned to the spirit realm');continue}
+    }
+    u.mvLeft = stat(u,'mv'); u.acted = false;
+  }
+  G.sel=null; G.mode='idle'; G.pending=null;
+  banner('Turn '+G.turn+' · Your Phase');
+  ui();
+}
+async function enemyPhase(){
+  G.phase='enemy'; G.sel=null; G.mode='idle'; G.pending=null; busy=true; ui();
+  await banner('Enemy Phase');
+  for (const e of units('e')){
+    if (!alive(e) || G.over) continue;
+    e.mvLeft = stat(e,'mv'); e.acted = false;
+    if (e.liftedBy) continue;
+    focus(e); await wait(250);
+    await aiAct(e);
+    if (checkEnd()) {busy=false;ui();return}
+  }
+  busy=false;
+  startPlayerPhase();
+  const h=host(); if(h) focus(h);
+}
+function bestAttack(e,sks,targets,x,y){
+  for (const s of sks) {
+    const inR = targets.filter(t => dist(x,y,t.x,t.y) <= s.rng+t.r).sort((a,b)=>a.hp-b.hp);
+    if (inR.length) return {s,t:inR[0]};
+  }
+  return null;
+}
+async function aiAct(e){
+  const targets = units('p').filter(u=>!u.liftedBy);
+  if (!targets.length) return;
+  const sks = skills(e).map(k=>({k,...SK[k]})).filter(s=>s.t==='phys'||s.t==='mag').filter(s=>e.sp>=s.sp).sort((a,b)=>b.pow-a.pow);
+  let plan = bestAttack(e,sks,targets,e.x,e.y);
+  if (!plan){
+    const t = targets.slice().sort((a,b)=>dist(e.x,e.y,a.x,a.y)-dist(e.x,e.y,b.x,b.y))[0];
+    const d = dist(e.x,e.y,t.x,t.y), maxR = Math.max(...sks.map(s=>s.rng));
+    const step = Math.min(e.mvLeft, Math.max(0,d-maxR*0.8));
+    if (step>3){
+      const p = findFree(e.x+(t.x-e.x)/d*step, e.y+(t.y-e.y)/d*step, e);
+      if (p && dist(e.x,e.y,p[0],p[1]) <= e.mvLeft+10) await moveTo(e,p[0],p[1]);
+    }
+    plan = bestAttack(e,sks,targets,e.x,e.y);
+  }
+  if (plan) await useSkill(e,plan.s.k,plan.t.x,plan.t.y,plan.t);
+}
+function checkEnd(){
+  if (G.over) return true;
+  if (!host()) {G.over='lose';showEnd();return true}
+  if (!units('e').length) {G.over='win';showEnd();return true}
+  return false;
+}
+
+// ===================== ACTIONS =====================
+async function moveTo(u,x,y){
+  const x0=u.x,y0=u.y,d=dist(x0,y0,x,y);
+  await tween(180+d*2.2, t=>{u.x=x0+(x-x0)*t;u.y=y0+(y-y0)*t;if(u.lift){u.lift.x=u.x;u.lift.y=u.y}});
+  u.mvLeft = Math.max(0,u.mvLeft-d);
+}
+function removeUnit(u,why){
+  const i = ents.indexOf(u); if (i<0) return;
+  ents.splice(i,1);
+  if (u.liftedBy){u.liftedBy.lift=null;u.liftedBy=null}
+  if (u.lift){const l=u.lift;l.liftedBy=null;u.lift=null;const p=findFree(u.x,u.y,l);if(p){l.x=p[0];l.y=p[1]}else if(l.k==='unit')removeUnit(l,'was lost');else ents.splice(ents.indexOf(l),1)}
+  if (u.held){const it=u.held;u.held=null;const p=findFree(u.x+10,u.y+6,it);if(p){it.x=p[0];it.y=p[1];ents.push(it);log(OT[it.type].n+' dropped')}}
+  if (why) log(u.name+' '+why);
+  if (G.sel===u) G.sel=null;
+}
+function damage(u,n,src){
+  u.hp = Math.max(0,u.hp-n);
+  popup(u.x,u.y,String(n),'#ffd0d0');
+  if (u.hp<=0){
+    popup(u.x,u.y-10, u.team==='e'?'Defeated':(u.host?'Down!':'Vanished'), '#ff8080');
+    if (u.team==='e') G.stats.defeated++;
+    removeUnit(u, u.team==='e'?'was defeated':(u.host?'fell!':'vanished'));
+  }
+}
+async function knock(u,fromX,fromY,kb){
+  if (!kb || !alive(u)) return;
+  const d = dist(fromX,fromY,u.x,u.y)||1, nx=u.x+(u.x-fromX)/d*kb, ny=u.y+(u.y-fromY)/d*kb;
+  const x0=u.x,y0=u.y;
+  if (!inIsland(nx,ny)){
+    await tween(260,t=>{u.x=x0+(nx-x0)*t;u.y=y0+(ny-y0)*t});
+    await fallOut(u); return;
+  }
+  const p = findFree(nx,ny,u,0) || [x0,y0];
+  await tween(200,t=>{u.x=x0+(p[0]-x0)*t;u.y=y0+(p[1]-y0)*t});
+}
+async function fallOut(e){
+  popup(e.x,e.y,'OUT OF BOUNDS!','#ffcf5b');
+  e.falling = 0;
+  await tween(500,t=>{e.falling=t});
+  if (e.k==='unit'){
+    if (e.team==='e'){G.stats.ob++;G.stats.defeated++}
+    if (e.host){e.hp=0}
+    removeUnit(e,'fell out of bounds');
+  } else { ents.splice(ents.indexOf(e),1); log(OT[e.type].n+' fell out of bounds') }
+}
+function calcDmg(a,d,s){
+  const [A,D] = s.t==='mag' ? [stat(a,'int'),stat(d,'res')] : [stat(a,'atk'),stat(d,'def')];
+  return Math.max(1, Math.round((A*s.pow*1.6 - D*0.8)*(0.9+Math.random()*0.2)));
+}
+const hitChance = (a,d) => clamp(90+(stat(a,'spd')-stat(d,'spd'))*2,50,100);
+const stealChance = (a,d) => clamp(40+(stat(a,'spd')-stat(d,'spd'))*3+(a.title==='Thief'?20:0),10,95);
+
+async function useSkill(u,k,tx,ty,target){
+  const s = SK[k];
+  u.sp -= s.sp; u.acted = true;
+  log(u.name+' used '+s.n);
+  // Visual: lunge for melee, projectile for ranged
+  if (s.proj){
+    const p={type:'proj',x0:u.x,y0:u.y,x1:tx,y1:ty,col:s.proj,t:0};fx.push(p);
+    await tween(160+dist(u.x,u.y,tx,ty)*1.4,t=>p.t=t); fx.splice(fx.indexOf(p),1);
+  } else if (s.aoe){
+    const p={type:'ring',x:tx,y:ty,r:s.aoe,t:0};fx.push(p);await tween(400,t=>p.t=t);fx.splice(fx.indexOf(p),1);
+  } else if (target){
+    const x0=u.x,y0=u.y,dx=(target.x-x0)*0.35,dy=(target.y-y0)*0.35;
+    await tween(220,t=>{const f=Math.sin(t*Math.PI);u.x=x0+dx*f;u.y=y0+dy*f}); u.x=x0;u.y=y0;
+  }
+  const hits = s.aoe ? units().filter(e=>e!==u&&!e.liftedBy&&dist(tx,ty,e.x,e.y)<=s.aoe+e.r) : (target&&alive(target)?[target]:[]);
+  for (const t of hits){
+    if (s.t==='heal'){
+      const n = Math.round(stat(u,'int')*s.pow*1.2); t.hp=Math.min(stat(t,'hp'),t.hp+n); popup(t.x,t.y,'+'+n,'#8dffa0');
+    } else if (s.t==='steal'){
+      if (!t.held){popup(t.x,t.y,'Nothing to steal','#ccc');continue}
+      if (Math.random()*100 < stealChance(u,t)){
+        const it=t.held; t.held=null; t.hp=Math.min(t.hp,stat(t,'hp'));
+        if (!u.held){u.held=it}else{const p=findFree(u.x+14,u.y,it);if(p){it.x=p[0];it.y=p[1];ents.push(it)}}
+        G.stats.stolen++; popup(t.x,t.y,'Stole '+OT[it.type].n+'!','#ffcf5b'); log(u.name+' stole '+(it.title?it.title+' ':'')+OT[it.type].n);
+      } else popup(t.x,t.y,'Steal failed','#ccc');
+    } else {
+      if (s.t==='phys' && Math.random()*100 > hitChance(u,t)){popup(t.x,t.y,'Miss','#ccc');continue}
+      damage(t,calcDmg(u,t,s),u);
+      if (alive(t)) await knock(t,u.x,u.y,s.kb);
+    }
+  }
+  await wait(250);
+}
+function canLift(u,e){
+  if (e===u||e.liftedBy||e.lift||u.lift) return false;
+  return e.w <= stat(u,'atk')*2.5;
+}
+const throwRange = u => 60+stat(u,'atk')*4;
+async function throwAt(u,x,y){
+  const e=u.lift, x0=u.x, y0=u.y; u.acted=true;
+  e.liftedBy=null; u.lift=null; e.air=30;
+  const d=dist(x0,y0,x,y);
+  await tween(250+d*1.6,t=>{e.x=x0+(x-x0)*t;e.y=y0+(y-y0)*t;e.air=30*(1-t)+Math.sin(t*Math.PI)*40});
+  e.air=0;
+  log(u.name+' threw '+(e.name||OT[e.type].n));
+  if (!inIsland(x,y)){await fallOut(e);return}
+  // Landing on someone hurts them.
+  for (const v of units()) if (v!==e && dist(v.x,v.y,x,y)<v.r+e.r*0.7){damage(v,Math.round(5+e.w*0.4),u)}
+  if (e.k==='unit' && alive(e)) damage(e,Math.max(1,Math.round(stat(e,'hp')*0.08)),u);
+  if (ents.includes(e)){const p=findFree(x,y,e,0);if(p){e.x=p[0];e.y=p[1]}}
+}
+function confine(sp,obj){
+  const u = mkUnit({...sp,team:'p',x:obj.x,y:obj.y});
+  u.obj = obj; u.hp = stat(u,'hp'); u.sp = maxSP(u);
+  u.turns = OT[obj.type].turns + (obj.title==='Elder'?1:0);
+  u.r = 12; u.mvLeft = stat(u,'mv'); u.acted=false;
+  ents.splice(ents.indexOf(obj),1); ents.push(u);
+  G.used[sp.name]=1; G.confLeft--; G.stats.confined++;
+  popup(u.x,u.y,'Confined!','#a8e6ff');
+  log(sp.name+' confined into '+(obj.title?obj.title+' ':'')+OT[obj.type].n);
+  return u;
+}
+
+// ===================== TAP HANDLING =====================
+function tap(sx,sy){
+  if (busy || G.over || G.phase!=='player') return;
+  const [wx,wy] = s2w(sx,sy), hit = pick(wx,wy), u = G.sel;
+  const mode = G.mode;
+  if (mode==='move'){
+    if (dist(u.x,u.y,wx,wy) > u.mvLeft+1) return flash('Too far');
+    const p = findFree(wx,wy,u,6);
+    if (!p || dist(p[0],p[1],wx,wy)>16 || dist(u.x,u.y,p[0],p[1])>u.mvLeft+1) return flash("Can't stand there");
+    G.mode='idle'; act(()=>moveTo(u,p[0],p[1]));
+  } else if (mode==='skill'){
+    const s=SK[G.skill];
+    if (s.aoe){
+      if (dist(u.x,u.y,wx,wy)>s.rng) return flash('Out of range');
+      G.mode='idle'; act(()=>useSkill(u,G.skill,wx,wy,null));
+    } else {
+      if (!hit || hit.k!=='unit' || hit===u) return flash('Tap a unit');
+      if (dist(u.x,u.y,hit.x,hit.y)>s.rng+hit.r) return flash('Out of range');
+      if (s.t==='steal' && !hit.held) return flash('Nothing to steal');
+      G.mode='idle'; act(()=>useSkill(u,G.skill,hit.x,hit.y,hit));
+    }
+  } else if (mode==='lift'){
+    if (!hit || hit===u) return flash('Tap something next to you');
+    if (dist(u.x,u.y,hit.x,hit.y)>REACH+hit.r) return flash('Too far');
+    if (!canLift(u,hit)) return flash('Too heavy');
+    u.lift=hit; hit.liftedBy=u; hit.x=u.x; hit.y=u.y; G.mode='idle'; log(u.name+' lifted '+(hit.name||OT[hit.type].n)); ui();
+  } else if (mode==='throw'){
+    if (dist(u.x,u.y,wx,wy)>throwRange(u)) return flash('Too far');
+    G.mode='idle'; act(()=>throwAt(u,wx,wy));
+  } else if (mode==='equip'){
+    if (!hit || hit.k!=='obj' || !OT[hit.type].equip) return flash('Tap a weapon');
+    if (dist(u.x,u.y,hit.x,hit.y)>REACH+hit.r) return flash('Too far');
+    ents.splice(ents.indexOf(hit),1);
+    if (u.held){const it=u.held;const p=findFree(u.x+12,u.y+4,it);it.x=p?p[0]:u.x;it.y=p?p[1]:u.y;ents.push(it)}
+    u.held=hit; u.sp=Math.min(u.sp,maxSP(u)); G.mode='idle'; log(u.name+' equipped '+OT[hit.type].n); ui();
+  } else if (mode==='confObj'){
+    const h=host();
+    if (!hit || hit.k!=='obj') return flash('Tap an object');
+    if (dist(h.x,h.y,hit.x,hit.y)>CONF_RANGE) return flash('Out of confine range');
+    G.pending=hit; ui();
+  } else {
+    G.sel = hit; G.pending=null; ui();
+  }
+}
+let flashT;
+function flash(s){G.flash=s;ui();clearTimeout(flashT);flashT=setTimeout(()=>{G.flash=null;ui()},1400)}
+async function act(fn){if(busy)return;busy=true;ui();try{await fn()}finally{busy=false;checkEnd();ui()}}
+
+// ===================== UI =====================
+function bar(lbl,v,m,col){return `<span>${lbl}</span><div class="bar"><i style="width:${clamp(v/m*100,0,100)}%;background:${col}"></i></div><span>${Math.round(v)}/${m}</span>`}
+function statGrid(u,preview){
+  return '<div class="stats">'+['atk','def','int','res','spd','mv'].map(k=>{
+    const {m}=statParts(u,k), v=stat(u,k), c=m>0.001?'up':m<-0.001?'dn':'';
+    return `<div><span class="mut">${SL[k]}</span><b class="${c}">${v}</b></div>`}).join('')+'</div>';
+}
+function modList(o){return Object.entries(o).filter(([,v])=>v).map(([k,v])=>`<span class="${v>0?'up':'dn'}">${SL[k]} ${pct(v)}</span>`).join(' · ')||'<span class="mut">none</span>'}
+function unitInfo(u){
+  const t=[`<div class="hd"><span class="nm">${u.name}</span><span class="mut">Lv ${u.lv} ${u.cls==='GrubKnight'?'Grub Knight':u.cls}</span>${u.title?`<span class="ttl">★ ${u.title}</span>`:''}</div>`];
+  t.push('<div class="bars">'+bar('HP',u.hp,stat(u,'hp'),u.team==='e'?'#e06060':'#6fd38a')+bar('SP',u.sp,maxSP(u),'#6fa8ff')+'</div>');
+  t.push(statGrid(u));
+  const bits=[];
+  if (u.obj) bits.push(`In <b>${u.obj.title?u.obj.title+' ':''}${OT[u.obj.type].n}</b> · <b style="color:var(--ac)">${u.turns}</b> turn${u.turns===1?'':'s'} left`);
+  if (u.held) bits.push(`Holding <b>${u.held.title?u.held.title+' ':''}${OT[u.held.type].n}</b>`);
+  if (u.lift) bits.push(`Carrying ${u.lift.name||OT[u.lift.type].n}`);
+  if (u.liftedBy) bits.push(`Being carried by ${u.liftedBy.name}`);
+  if (bits.length) t.push(`<div class="mut" style="margin-top:6px">${bits.join(' · ')}</div>`);
+  return t.join('');
+}
+function objInfo(o){
+  const d=OT[o.type];
+  return `<div class="hd"><span class="nm">${d.n}</span>${o.title?`<span class="ttl">★ ${o.title}</span>`:''}<span class="mut">Weight ${d.w}</span></div>
+  <div style="margin-top:6px;font-size:12px">Confine bonus: ${modList(d.mods)}</div>
+  ${o.title?`<div style="font-size:12px">Title bonus: ${modList(TT[o.title])}</div>`:''}
+  <div class="mut">A spirit confined here stays <b style="color:var(--ac)">${d.turns+(o.title==='Elder'?1:0)}</b> turns.${d.equip?' Can be equipped (grants '+SK[d.skill].n+').':''}</div>`;
+}
+function ui(){
+  const h=host();
+  $('#top').innerHTML = `<span class="chip">${STAGE.name}</span><span class="chip">Turn <b>${G.turn}</b></span>
+    <span class="chip">${G.phase==='player'?'Your phase':'Enemy phase'}</span><span class="sp"></span>
+    <span class="chip">Confine <b>${G.confLeft}</b>/${STAGE.conf}</span><span class="chip">Foes <b>${units('e').length}</b></span>
+    <button id="help" style="padding:3px 9px">?</button>`;
+  $('#help').onclick = showHelp;
+  const P=[], u=G.sel;
+  if (G.phase!=='player'){P.push('<div class="mut">Enemy phase…</div>')}
+  else if (G.pending){
+    const o=G.pending, sp=G.pendingSpirit, prev=mkUnit({...sp,team:'p'}); prev.obj=o; prev.hp=stat(prev,'hp'); prev.sp=maxSP(prev);
+    P.push(`<div class="mut">Preview: ${sp.name} confined into ${o.title?o.title+' ':''}${OT[o.type].n}</div>`+unitInfo({...prev,turns:OT[o.type].turns+(o.title==='Elder'?1:0)}));
+    P.push(`<div class="row"><button class="pri" data-a="doConf">Confine here</button><button data-a="cancel">Pick another</button></div>`);
+  }
+  else if (u && u.k==='unit'){
+    P.push(unitInfo(u));
+    if (u.team==='p' && alive(u)){
+      const dis = busy||!!u.liftedBy;
+      const row=[];
+      row.push(`<button data-a="move" ${dis||u.mvLeft<5||u.acted&&u.mvLeft<5?'disabled':''}>Move <span class="mut">${Math.round(u.mvLeft)}</span></button>`);
+      for (const k of skills(u)){const s=SK[k];row.push(`<button data-a="sk:${k}" ${dis||u.acted||u.lift||u.sp<s.sp?'disabled':''}>${s.n}${s.sp?` <span class="mut">${s.sp}SP</span>`:''}</button>`)}
+      if (u.lift) row.push(`<button data-a="throw" ${dis||u.acted?'disabled':''}>Throw</button>`);
+      else row.push(`<button data-a="lift" ${dis||u.acted?'disabled':''}>Lift</button>`);
+      const nearW = objs().some(o=>OT[o.type].equip&&!o.liftedBy&&dist(u.x,u.y,o.x,o.y)<=REACH+o.r);
+      if (nearW) row.push(`<button data-a="equip" ${dis?'disabled':''}>Equip</button>`);
+      if (u.host) row.push(`<button class="gold" data-a="confine" ${busy||!G.confLeft?'disabled':''}>Confine</button>`);
+      row.push(`<button data-a="done" ${dis||(u.acted&&u.mvLeft<5)?'disabled':''}>Wait</button>`);
+      P.push('<div class="row">'+row.join('')+'</div>');
+    }
+  }
+  else if (u && u.k==='obj'){P.push(objInfo(u))}
+  else {
+    P.push(`<div class="mut">Tap <b style="color:var(--gd)">${h?h.name:'your Warden'}</b> to confine spirits into objects on the field. Tap a unit to command it, or an object to see what it gives. Drag to look around.</div>`);
+  }
+  const modeHint={move:'Tap where to move (inside the blue circle).',skill:'Tap a target in range.',lift:'Tap something next to you to lift it.',
+    throw:'Tap where to throw. Outside the island = out of bounds!',equip:'Tap a weapon next to you.',confObj:'Tap an object inside the purple circle.'}[G.mode];
+  if (modeHint && !G.pending) P.push(`<div class="hint">${modeHint} <button data-a="cancel" style="padding:3px 8px;margin-left:6px">Cancel</button></div>`);
+  if (G.flash) P.push(`<div class="hint" style="border-color:#8a4656;background:#3a1f28">${G.flash}</div>`);
+  if (G.phase==='player') P.push(`<div class="row"><button class="warn" data-a="end" ${busy?'disabled':''}>End Phase</button>${u&&G.sel!==h&&h?`<button data-a="selHost">Select ${h.name}</button>`:''}</div>`);
+  P.push(`<div id="log">${G.log.slice(0,3).join('<br>')}</div>`);
+  $('#panel').innerHTML = P.join('');
+}
+$('#panel').addEventListener('click', e => {
+  const b=e.target.closest('button[data-a]'); if(!b||b.disabled) return;
+  const a=b.dataset.a, u=G.sel;
+  if (a==='end'){G.mode='idle';G.pending=null;enemyPhase();return}
+  if (a==='cancel'){G.mode='idle';G.pending=null;ui();return}
+  if (a==='selHost'){G.sel=host();G.mode='idle';focus(G.sel);ui();return}
+  if (a==='move') G.mode='move';
+  else if (a.startsWith('sk:')){G.mode='skill';G.skill=a.slice(3)}
+  else if (a==='lift') G.mode='lift';
+  else if (a==='throw') G.mode='throw';
+  else if (a==='equip') G.mode='equip';
+  else if (a==='done'){u.acted=true;u.mvLeft=0;G.mode='idle';G.sel=null}
+  else if (a==='confine'){openRoster();return}
+  else if (a==='doConf'){const sp=G.pendingSpirit,o=G.pending;G.pending=null;G.mode='idle';const nu=confine(sp,o);G.sel=nu}
+  ui();
+});
+function openRoster(){
+  const h=host();
+  $('#sheetIn').innerHTML = `<h2>Confine a spirit</h2><div class="mut">${G.confLeft} confines left this battle. Each spirit can be confined once per battle. Pick one, then tap an object within range of ${h.name}.</div>`+
+    ROSTER.map((s,i)=>{const used=G.used[s.name],c=CL[s.cls],tmp=mkUnit({...s,team:'p'});
+      return `<div class="card ${used?'off':''}" data-i="${i}"><div class="ic" style="background:${c.col}"></div><div class="tx"><b>${s.name}</b> <span class="mut">Lv ${s.lv} ${s.cls}</span>${s.title?` <span class="ttl">★ ${s.title}</span>`:''}
+      <div class="mut">HP ${stat(tmp,'hp')} · ATK ${stat(tmp,'atk')} · INT ${stat(tmp,'int')} · SPD ${stat(tmp,'spd')} · ${CL[s.cls].sk.map(k=>SK[k].n).join(', ')}</div></div>${used?'<span class="mut">Used</span>':''}</div>`}).join('')+
+    `<div class="row"><button data-x="close">Close</button></div>`;
+  $('#sheet').classList.add('on');
+}
+$('#sheet').addEventListener('click', e => {
+  if (e.target.id==='sheet' || e.target.closest('[data-x=close]')){$('#sheet').classList.remove('on');return}
+  const c=e.target.closest('.card'); if(!c||c.classList.contains('off')) return;
+  G.pendingSpirit=ROSTER[+c.dataset.i]; G.mode='confObj'; G.pending=null; $('#sheet').classList.remove('on'); ui();
+});
+function showEnd(){
+  const win=G.over==='win';
+  const spoils=units('p').filter(u=>u.held).map(u=>`${u.held.title?u.held.title+' ':''}${OT[u.held.type].n}`);
+  $('#ovIn').innerHTML = `<h2>${win?'Stage Clear!':'Defeat'}</h2>
+    <p>${win?'All foes are gone from '+STAGE.name+'.':'Your Warden has fallen.'}</p>
+    <p class="mut">Turns: ${G.turn} · Spirits confined: ${G.stats.confined} · Foes defeated: ${G.stats.defeated} (out of bounds: ${G.stats.ob}) · Items stolen: ${G.stats.stolen}</p>
+    ${win?`<p>Spoils carried home: ${spoils.length?spoils.join(', '):'<span class="mut">nothing — hold items when the battle ends to keep them</span>'}</p>`:''}
+    <div class="row"><button class="pri" id="again">${win?'Play again':'Retry'}</button></div>`;
+  $('#ov').classList.add('on'); $('#again').onclick = newBattle;
+}
+function showHelp(){
+  $('#ovIn').innerHTML = `<h2>How to play</h2>
+  <p><b>Confine:</b> your Warden fights alone. Select them, tap <b>Confine</b>, pick a spirit, then tap an object nearby. The spirit takes that object's stat bonuses and its title. Each battle has a limited number of confines.</p>
+  <p><b>Turn limit:</b> spirits only last a few turns (rocks last long, flowers short). When time runs out they leave and the object is used up.</p>
+  <p><b>Free movement:</b> no grid. Move anywhere inside your blue circle; you can split movement before and after acting.</p>
+  <p><b>Lift & throw:</b> lift objects, allies or foes next to you, then throw them. Anything that lands outside the island is out of bounds and gone. Knockback can push foes off too.</p>
+  <p><b>Steal:</b> rogues can take the item a foe is holding, which removes its bonus from them.</p>
+  <p><b>Equip:</b> pick up weapons on the field for a new skill and stats. Items held at the end of the battle are kept.</p>
+  <div class="row"><button class="pri" id="hc">Got it</button></div>`;
+  $('#ov').classList.add('on'); $('#hc').onclick=()=>{$('#ov').classList.remove('on');if(G.over)showEnd()};
+}
+
+// ===================== DRAWING =====================
+const DECOR = Array.from({length:70},(_,i)=>{const a=Math.sin(i*12.9898)*43758.5453,b=Math.sin(i*78.233)*12345.678;return [40+(a-Math.floor(a))*500,40+(b-Math.floor(b))*450,i%3]}).filter(([x,y])=>inIsland(x,y,10));
+const STARS = Array.from({length:60},(_,i)=>[(Math.sin(i*3.1)*0.5+0.5),(Math.sin(i*7.7)*0.5+0.5),(i%4)/4]);
+function polyPath(poly,dy=0){cx.beginPath();poly.forEach(([x,y],i)=>{const[sx,sy]=w2s(x,y);i?cx.lineTo(sx,sy+dy*cam.z):cx.moveTo(sx,sy+dy*cam.z)});cx.closePath()}
+function ell(x,y,r,stroke,fill,lw=2,dash){const[sx,sy]=w2s(x,y);cx.beginPath();cx.ellipse(sx,sy,r*cam.z,r*VS*cam.z,0,0,6.283);if(fill){cx.fillStyle=fill;cx.fill()}if(stroke){cx.setLineDash(dash||[]);cx.lineWidth=lw;cx.strokeStyle=stroke;cx.stroke();cx.setLineDash([])}}
+function draw(now){
+  for (let i=anims.length-1;i>=0;i--){const a=anims[i],t=Math.min(1,(now-a.t0)/a.ms);a.f(t<1?(1-Math.cos(t*Math.PI))/2:1);if(t>=1){anims.splice(i,1);a.res()}}
+  if (camT){cam.x+=(camT.x-cam.x)*0.12;cam.y+=(camT.y-cam.y)*0.12;if(Math.abs(camT.x-cam.x)+Math.abs(camT.y-cam.y)<1)camT=null}
+  cx.setTransform(dpr,0,0,dpr,0,0);
+  const g=cx.createLinearGradient(0,0,0,ch);g.addColorStop(0,'#0a0f22');g.addColorStop(1,'#1c1233');cx.fillStyle=g;cx.fillRect(0,0,cw,ch);
+  cx.fillStyle='rgba(255,255,255,.5)';for(const[a,b,c]of STARS)cx.fillRect(a*cw,b*ch,1+c,1+c);
+  if (!G) return requestAnimationFrame(draw);
+  // island: cliff then top
+  polyPath(ISLAND,26);cx.fillStyle='#3a2c26';cx.fill();
+  polyPath(ISLAND,13);cx.fillStyle='#4b392f';cx.fill();
+  polyPath(ISLAND);const gg=cx.createLinearGradient(0,w2s(0,40)[1],0,w2s(0,490)[1]);gg.addColorStop(0,'#5b8a44');gg.addColorStop(1,'#456f36');cx.fillStyle=gg;cx.fill();
+  cx.lineWidth=2;cx.strokeStyle='#7fae5a';cx.stroke();
+  for (const [x,y,t] of DECOR){const[sx,sy]=w2s(x,y);cx.fillStyle=t?'rgba(40,70,30,.35)':'rgba(120,170,80,.35)';cx.beginPath();cx.ellipse(sx,sy,(6+t*4)*cam.z,(3+t*2)*cam.z,0,0,6.283);cx.fill()}
+  // range indicators
+  const u=G.sel, h=host(), pulse=0.5+0.5*Math.sin(now/250);
+  if (u && alive(u) && G.phase==='player'){
+    ell(u.x,u.y,u.r+4,'#ffffff',null,2);
+    if (G.mode==='move') ell(u.x,u.y,u.mvLeft,'#7fd6ff','rgba(127,214,255,.12)',2);
+    if (G.mode==='skill'){const s=SK[G.skill];ell(u.x,u.y,s.rng,'#ffa64d','rgba(255,166,77,.10)',2);}
+    if (G.mode==='lift'||G.mode==='equip') ell(u.x,u.y,REACH+12,'#ffe27a','rgba(255,226,122,.10)',2);
+    if (G.mode==='throw') ell(u.x,u.y,throwRange(u),'#ff7a7a','rgba(255,122,122,.08)',2,[6,5]);
+  }
+  if (G.mode==='confObj' && h){
+    ell(h.x,h.y,CONF_RANGE,'#c79bff','rgba(199,155,255,.10)',2);
+    for (const o of objs()) if(!o.liftedBy&&dist(h.x,h.y,o.x,o.y)<=CONF_RANGE) ell(o.x,o.y,o.r+5+pulse*3,'rgba(199,155,255,.9)',null,2);
+  }
+  if (G.pending) ell(G.pending.x,G.pending.y,G.pending.r+7,'#ffffff',null,3);
+  if (u && u.k==='obj') ell(u.x,u.y,u.r+5,'#ffffff',null,2);
+  // entities, back to front; carried things drawn on top of their carrier
+  const list = ents.filter(e=>!e.liftedBy).sort((a,b)=>a.y-b.y);
+  for (const e of list){ drawEnt(e,0); if (e.lift) drawEnt(e.lift,34, e) }
+  // effects
+  for (let i=fx.length-1;i>=0;i--){
+    const f=fx[i];
+    if (f.type==='proj'){const x=f.x0+(f.x1-f.x0)*f.t,y=f.y0+(f.y1-f.y0)*f.t;const[sx,sy]=w2s(x,y,18+Math.sin(f.t*Math.PI)*20);cx.fillStyle=f.col;cx.beginPath();cx.arc(sx,sy,4*cam.z,0,6.283);cx.fill()}
+    else if (f.type==='ring'){ell(f.x,f.y,f.r*f.t,'#bfe8ff','rgba(160,220,255,'+(0.35*(1-f.t))+')',3)}
+    else if (f.type==='txt'){const t=(now-f.t0)/f.ms;if(t>=1){fx.splice(i,1);continue}const[sx,sy]=w2s(f.x,f.y,40+t*30);
+      cx.globalAlpha=1-t*t;cx.font=`bold ${Math.round(14*Math.max(cam.z,.8))}px system-ui`;cx.textAlign='center';cx.lineWidth=3;cx.strokeStyle='#000';cx.strokeText(f.s,sx,sy);cx.fillStyle=f.col;cx.fillText(f.s,sx,sy);cx.globalAlpha=1}
+  }
+  if (G.banner){const t=(now-G.banner.t0)/900;cx.globalAlpha=clamp(Math.min(t*5,(1-t)*4),0,1);cx.fillStyle='rgba(0,0,0,.55)';cx.fillRect(0,ch/2-26,cw,52);
+    cx.fillStyle='#f2c85b';cx.font='bold 22px system-ui';cx.textAlign='center';cx.fillText(G.banner.s,cw/2,ch/2+8);cx.globalAlpha=1}
+  requestAnimationFrame(draw);
+}
+function drawEnt(e,h,carrier){
+  const x=carrier?carrier.x:e.x, y=carrier?carrier.y:e.y, z=cam.z;
+  let [sx,sy]=w2s(x,y,h+(e.air||0));
+  const [gx,gy]=w2s(x,y);
+  if (e.falling!=null){sy+=e.falling*120*z;cx.globalAlpha=1-e.falling}
+  if (!carrier){cx.fillStyle='rgba(0,0,0,.28)';cx.beginPath();cx.ellipse(gx,gy,e.r*z,e.r*VS*z*0.8,0,0,6.283);cx.fill()}
+  if (e.k==='obj') drawObj(e,sx,sy,z); else drawUnit(e,sx,sy,z);
+  cx.globalAlpha=1;
+}
+function drawObj(o,sx,sy,z){
+  const t=o.type;
+  if (t==='rock'){cx.fillStyle='#8a8d96';cx.beginPath();cx.moveTo(sx-13*z,sy);cx.lineTo(sx-9*z,sy-14*z);cx.lineTo(sx+2*z,sy-18*z);cx.lineTo(sx+12*z,sy-10*z);cx.lineTo(sx+13*z,sy);cx.closePath();cx.fill();cx.fillStyle='#a9acb5';cx.beginPath();cx.moveTo(sx-9*z,sy-14*z);cx.lineTo(sx+2*z,sy-18*z);cx.lineTo(sx+4*z,sy-10*z);cx.lineTo(sx-6*z,sy-8*z);cx.closePath();cx.fill()}
+  else if (t==='tree'){cx.fillStyle='#6b4a2e';cx.fillRect(sx-3*z,sy-22*z,6*z,22*z);for(const[dx,dy,r,c]of[[0,-34,13,'#2f6b34'],[-8,-28,9,'#3a7d3e'],[8,-28,9,'#3a7d3e'],[0,-40,8,'#4a9450']]){cx.fillStyle=c;cx.beginPath();cx.arc(sx+dx*z,sy+dy*z,r*z,0,6.283);cx.fill()}}
+  else if (t==='flower'){cx.strokeStyle='#3f8a3a';cx.lineWidth=2*z;cx.beginPath();cx.moveTo(sx,sy);cx.lineTo(sx,sy-10*z);cx.stroke();for(let a=0;a<5;a++){cx.fillStyle='#d9c8ff';cx.beginPath();cx.arc(sx+Math.cos(a*1.256)*4*z,sy-12*z+Math.sin(a*1.256)*4*z,2.6*z,0,6.283);cx.fill()}cx.fillStyle='#ffe27a';cx.beginPath();cx.arc(sx,sy-12*z,2*z,0,6.283);cx.fill()}
+  else if (t==='barrel'){cx.fillStyle='#8a5a32';cx.beginPath();cx.roundRect(sx-9*z,sy-20*z,18*z,20*z,4*z);cx.fill();cx.fillStyle='#4a3020';cx.fillRect(sx-9*z,sy-16*z,18*z,2*z);cx.fillRect(sx-9*z,sy-6*z,18*z,2*z)}
+  else drawWeapon(t,sx,sy-8*z,z,true);
+  if (o.title){cx.fillStyle='#f2c85b';cx.font=`bold ${Math.round(10*z)}px system-ui`;cx.textAlign='center';cx.fillText('★',sx+11*z,sy-14*z)}
+}
+function drawWeapon(t,sx,sy,z,ground){
+  cx.save();cx.translate(sx,sy);if(ground)cx.rotate(-0.6);
+  if (t==='sword'){cx.strokeStyle='#dfe6ef';cx.lineWidth=3*z;cx.beginPath();cx.moveTo(0,-12*z);cx.lineTo(0,6*z);cx.stroke();cx.strokeStyle='#b08a3e';cx.beginPath();cx.moveTo(-4*z,3*z);cx.lineTo(4*z,3*z);cx.stroke()}
+  if (t==='bow'){cx.strokeStyle='#a07040';cx.lineWidth=2.5*z;cx.beginPath();cx.arc(0,0,9*z,-1.3,1.3);cx.stroke();cx.strokeStyle='#ddd';cx.lineWidth=1;cx.beginPath();cx.moveTo(Math.cos(-1.3)*9*z,Math.sin(-1.3)*9*z);cx.lineTo(Math.cos(1.3)*9*z,Math.sin(1.3)*9*z);cx.stroke()}
+  if (t==='staff'){cx.strokeStyle='#8a6a40';cx.lineWidth=2.5*z;cx.beginPath();cx.moveTo(0,-12*z);cx.lineTo(0,10*z);cx.stroke();cx.fillStyle='#9fe0ff';cx.beginPath();cx.arc(0,-13*z,3.5*z,0,6.283);cx.fill()}
+  cx.restore();
+}
+function drawUnit(u,sx,sy,z){
+  const c=CL[u.cls], spirit=u.team==='p'&&!u.host, big=(u.r||12)/12;
+  if (spirit){cx.globalAlpha*=0.88;cx.fillStyle='rgba(127,214,255,.18)';cx.beginPath();cx.ellipse(sx,sy-14*z,16*z,20*z,0,0,6.283);cx.fill()}
+  const enemy=u.team==='e';
+  if (enemy && u.cls==='Mossling'){cx.fillStyle=c.col;cx.beginPath();cx.ellipse(sx,sy-10*z,12*z,11*z,0,0,6.283);cx.fill();eyes(sx,sy-12*z,z,'#fff')}
+  else if (enemy && u.cls==='Thornbat'){const f=Math.sin(performance.now()/90)*4*z;cx.fillStyle='#6a4a9a';cx.beginPath();cx.moveTo(sx,sy-20*z);cx.lineTo(sx-18*z,sy-26*z+f);cx.lineTo(sx-6*z,sy-14*z);cx.moveTo(sx,sy-20*z);cx.lineTo(sx+18*z,sy-26*z+f);cx.lineTo(sx+6*z,sy-14*z);cx.fill();cx.fillStyle=c.col;cx.beginPath();cx.arc(sx,sy-18*z,7*z,0,6.283);cx.fill();eyes(sx,sy-19*z,z,'#ffe27a')}
+  else if (enemy && u.cls==='Hexcap'){cx.fillStyle='#e8dcc0';cx.fillRect(sx-5*z,sy-14*z,10*z,14*z);cx.fillStyle=c.col;cx.beginPath();cx.ellipse(sx,sy-16*z,13*z,8*z,0,Math.PI,0);cx.fill();cx.fillStyle='#fff';cx.beginPath();cx.arc(sx-5*z,sy-19*z,2*z,0,6.283);cx.arc(sx+4*z,sy-21*z,1.6*z,0,6.283);cx.fill();eyes(sx,sy-9*z,z,'#222')}
+  else if (enemy && u.cls==='GrubKnight'){cx.fillStyle=c.col;cx.beginPath();cx.ellipse(sx,sy-14*z,16*z,15*z,0,0,6.283);cx.fill();cx.fillStyle='#6d7480';cx.beginPath();cx.ellipse(sx,sy-26*z,11*z,8*z,0,Math.PI,0);cx.fill();cx.fillRect(sx-11*z,sy-27*z,22*z,4*z);eyes(sx,sy-20*z,z,'#ff6060')}
+  else {
+    // humanoid: body + head + class mark
+    cx.fillStyle=c.col;cx.beginPath();cx.roundRect(sx-7*z,sy-20*z,14*z,18*z,5*z);cx.fill();
+    cx.fillStyle='#f1d3b8';cx.beginPath();cx.arc(sx,sy-26*z,6.5*z,0,6.283);cx.fill();
+    cx.fillStyle='#2a2a33';cx.fillRect(sx-3*z,sy-27*z,1.6*z,2*z);cx.fillRect(sx+1.6*z,sy-27*z,1.6*z,2*z);
+    const k=u.cls;
+    if (k==='Witch'){cx.fillStyle='#5b3a8a';cx.beginPath();cx.moveTo(sx-9*z,sy-30*z);cx.lineTo(sx+9*z,sy-30*z);cx.lineTo(sx+2*z,sy-44*z);cx.fill()}
+    if (k==='Archer'){cx.fillStyle='#3f7a46';cx.beginPath();cx.arc(sx,sy-28*z,7*z,Math.PI,0);cx.fill()}
+    if (k==='Soldier'){cx.fillStyle='#9aa3b0';cx.beginPath();cx.arc(sx,sy-28*z,7*z,Math.PI,0);cx.fill();cx.fillRect(sx-7*z,sy-29*z,14*z,2*z)}
+    if (k==='Healer'){cx.fillStyle='#e05a5a';cx.fillRect(sx-1.5*z,sy-17*z,3*z,9*z);cx.fillRect(sx-4.5*z,sy-14*z,9*z,3*z)}
+    if (k==='Rogue'){cx.fillStyle='#7a3a2a';cx.fillRect(sx-7*z,sy-21*z,14*z,3*z);cx.fillStyle='#3a2a2a';cx.beginPath();cx.arc(sx,sy-28*z,7*z,Math.PI*1.05,-0.05);cx.fill()}
+    if (k==='Warden'){cx.fillStyle='#4a3a6a';cx.beginPath();cx.arc(sx,sy-28*z,7*z,Math.PI,0);cx.fill();cx.fillStyle='#ffe27a';cx.beginPath();cx.arc(sx+10*z,sy-10*z,3*z,0,6.283);cx.fill();cx.strokeStyle='#ffe27a';cx.globalAlpha*=.35;cx.beginPath();cx.arc(sx+10*z,sy-10*z,6*z,0,6.283);cx.stroke();cx.globalAlpha/=.35}
+  }
+  if (u.held) drawWeapon(u.held.type,sx+12*z*big,sy-14*z,z,false);
+  cx.globalAlpha=1;
+  // HP bar + turn badge
+  const bw=24*z*big, by=sy-(enemy&&u.cls==='GrubKnight'?40:enemy?32:46)*z;
+  cx.fillStyle='rgba(0,0,0,.6)';cx.fillRect(sx-bw/2-1,by-1,bw+2,5);
+  cx.fillStyle=enemy?'#e06060':'#6fd38a';cx.fillRect(sx-bw/2,by,bw*clamp(u.hp/stat(u,'hp'),0,1),3);
+  if (spirit){cx.fillStyle='#16304a';cx.beginPath();cx.arc(sx+bw/2+6,by+1,6.5,0,6.283);cx.fill();cx.strokeStyle='#7fd6ff';cx.lineWidth=1;cx.stroke();cx.fillStyle='#bfeaff';cx.font='bold 9px system-ui';cx.textAlign='center';cx.fillText(u.turns,sx+bw/2+6,by+4)}
+  if (u.boss){cx.fillStyle='#f2c85b';cx.font='bold 10px system-ui';cx.textAlign='center';cx.fillText('BOSS',sx,by-4)}
+  if (u.team==='p'&&G.phase==='player'&&u.acted&&u.mvLeft<5){cx.fillStyle='rgba(255,255,255,.7)';cx.font='9px system-ui';cx.textAlign='center';cx.fillText('done',sx,sy+10*z)}
+}
+function eyes(sx,sy,z,col){cx.fillStyle=col;cx.beginPath();cx.arc(sx-3.5*z,sy,1.8*z,0,6.283);cx.arc(sx+3.5*z,sy,1.8*z,0,6.283);cx.fill()}
+
+// ===================== BOOT =====================
+window.addEventListener('resize',()=>{resize()});
+resize(); newBattle(); requestAnimationFrame(draw);
+</script>
+</body>
+</html>
