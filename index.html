@@ -27,6 +27,13 @@ button.on{border-color:var(--gd);color:var(--gd)}
 .gd{color:var(--gd)}
 .speech{background:#fff;color:#222;border-radius:10px;padding:7px 10px;font-size:12px;margin-bottom:10px}
 .ibox{width:38px;height:38px;border-radius:8px;background:#141a26;flex:none;display:flex;align-items:center;justify-content:center}
+.slots{display:flex;gap:8px;align-items:stretch}
+.slot{flex:1;background:#141a26;border:2px dashed var(--ln);border-radius:12px;padding:8px;text-align:center;min-height:104px;font-size:12px}
+.slot.f{border-style:solid;border-color:var(--gd)}.slot.g{border-style:solid;border-color:#c79bff}
+.slot .ic{margin:0 auto 4px;width:40px;height:40px}
+.result{background:#161c28;border:1px solid var(--gd);border-radius:12px;padding:8px;margin-top:10px;box-shadow:0 0 16px #c79bff33}
+.bk{font-size:11px;color:var(--mut);background:#000a;border-radius:6px;padding:1px 5px}
+.card.sel{border-color:var(--gd)}.card.fod{border-color:#c79bff}
 .detail{background:#161c28;border:1px solid var(--ln);border-top:none;border-radius:0 0 10px 10px;padding:8px;margin-top:-4px}
 .who{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--ln);font-size:12px}
 .who i{width:22px;height:22px;border-radius:50%;flex:none}
@@ -97,6 +104,8 @@ const OT = {
   spear:  {n:'Reed Spear', mods:{atk:.15,mv:.10}, turns:4, w:7, r:9, equip:{atk:12}, skill:'pierce'},
   staff:  {n:'Oak Staff', mods:{int:.25},  turns:3, w:5, r:9,  equip:{int:14},       skill:'bolt'},
 };
+// Item tiers (from fusion): each tier adds 2 to every bonus an item gives; penalties shrink by 1 per tier, down to 0.
+const equipVal = (type,tier,k) => {const e=OT[type].equip||{}; if(!(k in e)) return 0; const v=e[k]; return v>=0 ? v+tier*2 : Math.min(0,v+tier)};
 // Titles: % stat changes. Any unit or object can carry one.
 const TT = {
   '':{}, Sturdy:{def:.2,res:.1}, Fierce:{atk:.2}, Swift:{spd:.25,mv:.15}, Sage:{int:.25},
@@ -169,12 +178,12 @@ const units = t => ents.filter(e => e.k==='unit' && (!t || e.team===t));
 const objs = () => ents.filter(e => e.k==='obj');
 const host = () => ents.find(e => e.host);
 
-function mkObj(type,x,y,title=''){const o=OT[type];return {k:'obj',id:uid++,type,x,y,title,liftedBy:null,r:o.r,w:o.w}}
+function mkObj(type,x,y,title='',tier=0){const o=OT[type];return {k:'obj',id:uid++,type,x,y,title,tier,liftedBy:null,r:o.r,w:o.w}}
 function mkUnit(o){
   const c = CL[o.cls], lvm = 1+(o.lv-1)*0.12, b = {};
   for (const k of STATS) b[k] = k==='mv' ? c.b[k] : Math.round(c.b[k]*lvm);
   const u = {k:'unit',id:uid++,team:o.team,name:o.name,cls:o.cls,lv:o.lv,b,title:o.title||'',x:o.x||0,y:o.y||0,
-    held:o.held?mkObj(o.held,0,0,o.heldTitle):null,lift:null,liftedBy:null,obj:null,turns:0,mvLeft:0,acted:false,
+    held:o.held?mkObj(o.held,0,0,o.heldTitle,o.heldTier):null,lift:null,liftedBy:null,obj:null,turns:0,mvLeft:0,acted:false,
     host:!!o.host,boss:!!o.boss,r:c.r||12,w:c.w||20};
   u.hp = stat(u,'hp'); u.sp = maxSP(u); return u;
 }
@@ -184,7 +193,7 @@ function statParts(u,k){
   if (u.obj) m += (OT[u.obj.type].mods[k]||0) + (TT[u.obj.title][k]||0);
   m += TT[u.title][k]||0;
   if (u.held) m += TT[u.held.title][k]||0;
-  const flat = u.held ? (OT[u.held.type].equip?.[k]||0) : 0;
+  const flat = u.held ? equipVal(u.held.type,u.held.tier||0,k) : 0;
   return {m, flat};
 }
 function stat(u,k){const {m,flat}=statParts(u,k);return Math.max(1,Math.round(u.b[k]*(1+m)+flat))}
@@ -192,7 +201,7 @@ const maxSP = u => 6 + Math.round(stat(u,'int')*0.6);
 function skills(u){const s=[...CL[u.cls].sk];if(u.held&&OT[u.held.type].skill&&!s.includes(OT[u.held.type].skill))s.push(OT[u.held.type].skill);return s}
 const alive = u => ents.includes(u);
 // Unit from a saved character (roster entry or the Warden); its item comes along.
-function charUnit(c,extra){const u=mkUnit({...c,held:c.item?.type,heldTitle:c.item?.title,...extra});u.rid=c.id;return u}
+function charUnit(c,extra){const u=mkUnit({...c,held:c.item?.type,heldTitle:c.item?.title,heldTier:c.item?.tier||0,...extra});u.rid=c.id;return u}
 
 function newBattle(st=STAGES[0]){
   STAGE = st; ISLAND = st.island; DECOR = mkDecor();
@@ -504,7 +513,7 @@ function unitInfo(u){
   t.push(statGrid(u));
   const bits=[];
   if (u.obj) bits.push(`In <b>${u.obj.title?u.obj.title+' ':''}${OT[u.obj.type].n}</b> · <b style="color:var(--ac)">${u.turns}</b> turn${u.turns===1?'':'s'} left`);
-  if (u.held) bits.push(`Holding <b>${u.held.title?u.held.title+' ':''}${OT[u.held.type].n}</b>`);
+  if (u.held) bits.push(`Holding <b>${itemName(u.held)}</b>`);
   if (u.lift) bits.push(`Carrying ${u.lift.name||OT[u.lift.type].n}`);
   if (u.liftedBy) bits.push(`Being carried by ${u.liftedBy.name}`);
   if (bits.length) t.push(`<div class="mut" style="margin-top:6px">${bits.join(' · ')}</div>`);
@@ -858,14 +867,14 @@ function loadSave(){
   return newSave();
 }
 function save(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(SAVE))}catch(e){}}
-const itemName = it => (it.title?it.title+' ':'')+OT[it.type].n;
+const itemName = it => (it.title?it.title+' ':'')+OT[it.type].n+(it.tier?' +'+it.tier:'');
 const ROSTER_MAX = 20;
 
 // Weapons held by your units or left on the field come home after a win.
 function lootList(){
   const L = [];
-  for (const u of units('p')) if (u.held) L.push({u, type:u.held.type, title:u.held.title});
-  for (const o of objs()) if (OT[o.type].equip) L.push({type:o.type, title:o.title});
+  for (const u of units('p')) if (u.held) L.push({u, type:u.held.type, title:u.held.title, tier:u.held.tier||0});
+  for (const o of objs()) if (OT[o.type].equip) L.push({type:o.type, title:o.title, tier:o.tier||0});
   return L;
 }
 function settle(){
@@ -874,7 +883,7 @@ function settle(){
     SAVE.host.item = null;
     for (const r of SAVE.roster) if (G.used[r.id]) r.item = null;
     for (const l of lootList()){
-      const it = {id:SAVE.nid++, type:l.type, title:l.title};
+      const it = {id:SAVE.nid++, type:l.type, title:l.title, tier:l.tier||0};
       const owner = l.u && (l.u.host ? SAVE.host : SAVE.roster.find(r=>r.id===l.u.rid));
       if (owner && !owner.item) owner.item = it; else SAVE.items.push(it);
     }
@@ -895,7 +904,7 @@ const BLD = [
   {id:'soul', n:'Soulwright', what:'Create characters', x:152,y:240, col:'#c79bff', kind:'hut',  hi:'Name a shape, and I will call a spirit into it.'},
   {id:'trade',n:'Trader',     what:'Shop',              x:464,y:216, col:'#f2c85b', kind:'stall',hi:'Fresh stock off the boat! Have a look.'},
   {id:'title',n:'Titlesmith', what:'Move titles',       x:528,y:416, col:'#ff9b6b', kind:'forge',hi:'Bring me a title and something to put it on.'},
-  {id:'arch', n:'Archive',    what:'Fusion',            x:112,y:480, col:'#7fd6ff', kind:'tower',hi:'The old books are still being sorted.'},
+  {id:'arch', n:'Archive',    what:'Fusion',            x:112,y:480, col:'#7fd6ff', kind:'tower',hi:'Two of a kind make something greater. Bring me a pair.'},
   {id:'ferry',n:'Ferry',      what:'Set sail',          x:320,y:576, col:'#8fe3a0', kind:'dock', hi:'Wind is good. Where to, Warden?'},
   {id:'house',n:'Your house', what:'Roster & items',    x:312,y:336, col:'#f0d27a', kind:'house',hi:'Home. Your spirits rest here between battles.'},
 ];
@@ -1058,6 +1067,7 @@ function openBuilding(b){
   else if (b.id==='title'){HS={b,src:null,dst:null};openTitles()}
   else if (b.id==='house'){HS={b,sel:null,rel:false};openHouse()}
   else if (b.id==='ferry') openChart();
+  else if (b.id==='arch'){HS={b,tab:'char',keep:null,cons:null};openArchive()}
   else if (b.id==='trade'){HS={b,tab:'buy',sel:'sword',qty:1,say:b.hi};openShop()}
   else sheet(b,`<p class="mut">Opens in a later update.</p>`);
 }
@@ -1109,7 +1119,7 @@ function openHouse(){
       chars.map((c,i)=>`<div class="card" data-h="char" data-i="${i}"><div class="ic" style="background:${CL[c.cls].col}"></div><div class="tx"><b>${c.name}</b> <span class="mut">Lv ${c.lv} ${c.cls}</span>${c.title?` <span class="ttl">★ ${c.title}</span>`:''}
         <div class="mut">${c.item?'Holding '+itemName(c.item):'Empty-handed'}</div></div><span class="mut">›</span></div>`).join('')+
       `<div style="margin-top:12px"><b>Storage</b></div>`+
-      (SAVE.items.length?SAVE.items.map(it=>`<div class="card"><div class="tx"><b>${OT[it.type].n}</b>${it.title?` <span class="ttl">★ ${it.title}</span>`:''}<div class="mut">${SK[OT[it.type].skill].n} · ${Object.entries(OT[it.type].equip).map(([k,v])=>SL[k]+' +'+v).join(', ')}</div></div></div>`).join(''):'<p class="mut">Empty. Weapons you hold or leave on the field after a win end up here.</p>');
+      (SAVE.items.length?SAVE.items.map(it=>`<div class="card"><div class="tx"><b>${OT[it.type].n}</b>${it.tier?` <span class="bk">+${it.tier}</span>`:''}${it.title?` <span class="ttl">★ ${it.title}</span>`:''}<div class="mut">${itemLineOf(it)}</div></div></div>`).join(''):'<p class="mut">Empty. Weapons you hold or leave on the field after a win end up here.</p>');
   } else {
     const c=chars[HS.sel], u=charUnit(c,{team:'p'});
     body=`<div style="margin-top:8px">${unitInfo(u)}<div class="bars">${bar('EXP',c.exp||0,expNeed(c.lv),'#c79bff')}</div></div><div class="mut" style="margin-top:4px">Skills: ${skills(u).map(k=>SK[k].n).join(', ')}</div>`;
@@ -1161,6 +1171,7 @@ function hubAct(a,d){
       HS.sel=null; HS.rel=false; openHouse(); return hubMsg(`${c.name} has left the island.`);
     }
     case 'stab': case 'ssel': case 'q-': case 'q+': case 'buy': case 'buyeq': case 'sell': case 'sellc': return shopAct(a,d);
+    case 'atab': case 'apick': case 'aclear': case 'afuse': return archAct(a,d);
     case 'sail': return startBattle(STAGES[C.sel]);
     case 'clist': C.list=!C.list; return chartUI();
     case 'cback': return closeChart();
@@ -1170,7 +1181,7 @@ function hubAct(a,d){
 const CONS = {herb:{n:'Healing Herb',d:'Heals 40 HP',hp:40,price:40}, tonic:{n:'Spirit Tonic',d:'Restores 10 SP',sp:10,price:90}};
 const PRICE = {sword:240,axe:320,spear:280,bow:260,staff:300};
 const STOCK = ['sword','axe','spear','bow','staff','herb','tonic'];
-const sellPrice = it => Math.floor((PRICE[it.type]||100)/2*(it.title?1.5:1));
+const sellPrice = it => Math.floor(((PRICE[it.type]||100)/2+(it.tier||0)*60)*(it.title?1.5:1));
 const ICON = {
   sword:'<svg width="30" height="30" viewBox="0 0 30 30"><path d="M22 4 L10 16" stroke="#dfe6ef" stroke-width="4" stroke-linecap="round"/><path d="M8 13 L15 20" stroke="#b08a3e" stroke-width="3"/><path d="M9 19 L5 23" stroke="#6b4a2e" stroke-width="3"/></svg>',
   axe:'<svg width="30" height="30" viewBox="0 0 30 30"><path d="M8 26 L20 8" stroke="#8a6a40" stroke-width="3"/><path d="M17 4 q10 2 7 12 l-8 -6z" fill="#c9d2dc"/></svg>',
@@ -1218,7 +1229,7 @@ function openShop(){
   } else {
     const bagKeys = Object.keys(CONS).filter(k=>SAVE.bag[k]>0);
     if (!SAVE.items.length && !bagKeys.length) P.push('<p class="mut">Nothing to sell. Equipped items have to be unequipped at your house first.</p>');
-    SAVE.items.forEach((it,i)=>P.push(`<div class="card"><div class="ibox">${ICON[it.type]}</div><div class="tx"><b>${OT[it.type].n}</b>${it.title?` <span class="ttl">★ ${it.title}</span>`:''}<div class="mut">${itemLine(it.type)}</div></div><button data-h="sell" data-i="${i}">Sell ${sellPrice(it)}</button></div>`));
+    SAVE.items.forEach((it,i)=>P.push(`<div class="card"><div class="ibox">${ICON[it.type]}</div><div class="tx"><b>${OT[it.type].n}</b>${it.tier?` <span class="bk">+${it.tier}</span>`:''}${it.title?` <span class="ttl">★ ${it.title}</span>`:''}<div class="mut">${itemLineOf(it)}</div></div><button data-h="sell" data-i="${i}">Sell ${sellPrice(it)}</button></div>`));
     for (const k of bagKeys) P.push(`<div class="card"><div class="ibox">${ICON[k]}</div><div class="tx"><b>${CONS[k].n}</b> <span class="mut">×${SAVE.bag[k]}</span><div class="mut">${CONS[k].d}</div></div><button data-h="sellc" data-v="${k}">Sell 1 for ${Math.floor(CONS[k].price/2)}</button></div>`);
     if (SAVE.items.length) P.push('<p class="mut">Titled items sell for 50% more. Equipped items have to be unequipped at your house first.</p>');
   }
@@ -1276,6 +1287,77 @@ function lineHits(u,tx,ty,rng){
     const px = e.x-u.x, py = e.y-u.y, along = px*dx+py*dy, off = Math.abs(px*dy-py*dx);
     return along>0 && along<=rng+e.r && off<=e.r+6;
   }).sort((a,b)=>dist(u.x,u.y,a.x,a.y)-dist(u.x,u.y,b.x,b.y));
+}
+
+// ===================== ARCHIVE =====================
+const MAX_TIER = 5, MAX_LV = 50;
+const fuseLv = (k,c) => Math.min(MAX_LV, k.lv + (c.lv>=k.lv ? 3 : 2));
+const fuseCharCost = k => 60*k.lv;
+const fuseTier = (a,b) => Math.min(MAX_TIER, Math.max(a.tier||0,b.tier||0)+1);
+const fuseItemCost = (a,b) => 150*fuseTier(a,b);
+const itemLineOf = it => Object.keys(OT[it.type].equip).map(k=>{const v=equipVal(it.type,it.tier||0,k);return SL[k]+' '+(v>0?'+':'−')+Math.abs(v)}).join(' ')+' · '+SK[OT[it.type].skill].n;
+function openArchive(){
+  const isC = HS.tab==='char', pool = isC ? SAVE.roster : SAVE.items;
+  const keep = pool.find(x=>x.id===HS.keep), cons = pool.find(x=>x.id===HS.cons);
+  const compat = x => !keep || (isC ? x.cls===keep.cls : x.type===keep.type);
+  const slot = (lab,x,cls) => {
+    if (!x) return `<div class="slot"><div class="mut">${lab}</div><div class="mut" style="margin-top:22px">${keep||isC?'Tap one below':'Tap one below'}</div></div>`;
+    const ic = isC ? `<div class="ic" style="background:${CL[x.cls].col}"></div>` : `<div class="ibox" style="margin:0 auto 4px">${ICON[x.type]}</div>`;
+    return `<div class="slot ${cls}" data-h="aclear" data-v="${lab}"><div class="mut">${lab}</div>${ic}<b>${isC?x.name:OT[x.type].n+(x.tier?' +'+x.tier:'')}</b><div class="mut">${isC?`Lv ${x.lv} ${x.cls}`:itemLineOf(x)}</div>${x.title?`<div class="ttl">★ ${x.title}</div>`:'<div class="mut">no title</div>'}</div>`;
+  };
+  let res = '', btn = '';
+  if (keep && cons){
+    if (isC){
+      const nl = fuseLv(keep,cons), nt = keep.title||cons.title, cost = fuseCharCost(keep);
+      const a = charUnit(keep,{team:'p'}), b = charUnit({...keep,lv:nl,title:nt},{team:'p'});
+      const cells = ['hp','atk','def','int','res','spd'].map(k=>`<div><span class="mut">${SL[k]}</span><b class="up">+${stat(b,k)-stat(a,k)}</b></div>`).join('');
+      res = `<div class="result"><div class="row" style="justify-content:space-between"><b>Result</b><span class="mut">${keep.name} the ${keep.cls}</span></div>
+        <div style="margin:4px 0">Lv ${keep.lv} → <b class="up">${nl}</b>${nt?` · <span class="ttl">★ ${nt}</span>${keep.title?'':' <span class="mut">(inherited)</span>'}`:''}</div><div class="stats">${cells}</div>
+        <div class="mut" style="margin-top:6px">${cons.name} leaves the island.${cons.item?' Their '+itemName(cons.item)+' goes to storage.':''}</div></div>`;
+      btn = `<button class="pri" style="flex:1" data-h="afuse" ${SAVE.gold<cost||keep.lv>=MAX_LV?'disabled':''}>${keep.lv>=MAX_LV?'Max level':'Fuse for '+cost.toLocaleString()+' Bordin'}</button>`;
+    } else {
+      const nt = fuseTier(keep,cons), cost = fuseItemCost(keep,cons), ti = keep.title||cons.title, maxed = Math.max(keep.tier||0,cons.tier||0)>=MAX_TIER;
+      const cells = Object.keys(OT[keep.type].equip).map(k=>{const o=equipVal(keep.type,keep.tier||0,k),n=equipVal(keep.type,nt,k);return `<div><span class="mut">${SL[k]}</span><b class="${n>o?'up':''}">${o>0?'+':''}${o} → ${n>0?'+':''}${n}</b></div>`}).join('');
+      res = `<div class="result"><div class="row" style="justify-content:space-between"><b>Result</b><span class="mut">${OT[keep.type].n} <span class="bk">+${nt}</span>${ti?` <span class="ttl">★ ${ti}</span>`:''}</span></div><div class="stats" style="grid-template-columns:repeat(3,1fr)">${cells}</div></div>`;
+      btn = `<button class="pri" style="flex:1" data-h="afuse" ${SAVE.gold<cost||maxed?'disabled':''}>${maxed?'Already at max':'Fuse for '+cost.toLocaleString()+' Bordin'}</button>`;
+    }
+  } else res = `<div class="mut" style="margin:10px 0">${isC?'Pick a character to keep, then a second of the same class to consume. Only spirits can be fused, not your Warden.':'Pick an item to keep, then a second copy of the same item. Items must be in storage: unequip them at your house first.'}</div>`;
+  const list = pool.map(x=>{
+    const dim = keep && x.id!==keep.id && !compat(x), cls = x.id===HS.keep?'sel':x.id===HS.cons?'fod':dim?'off':'';
+    const ic = isC ? `<div class="ic" style="background:${CL[x.cls].col}"></div>` : `<div class="ibox">${ICON[x.type]}</div>`;
+    const nm = isC ? `<b>${x.name}</b> <span class="mut">Lv ${x.lv} ${x.cls}</span>` : `<b>${OT[x.type].n}</b>${x.tier?` <span class="bk">+${x.tier}</span>`:''}`;
+    return `<div class="card ${cls}" ${dim?'':`data-h="apick" data-id="${x.id}"`}>${ic}<div class="tx">${nm}${x.title?` <span class="ttl">★ ${x.title}</span>`:''}${isC&&x.item?`<div class="mut">${itemName(x.item)}</div>`:''}${isC?'':`<div class="mut">${itemLineOf(x)}</div>`}</div></div>`;
+  }).join('') || `<p class="mut">${isC?'No spirits yet.':'Your storage is empty.'}</p>`;
+  sheet(HS.b,`<div class="row"><button data-h="atab" data-v="char" class="${isC?'on':''}">Characters</button><button data-h="atab" data-v="item" class="${isC?'':'on'}">Items</button></div>
+    <div class="slots" style="margin-top:10px">${slot('KEEP',keep,'f')}<div class="gd" style="align-self:center;font-size:22px">+</div>${slot('CONSUME',cons,'g')}</div>${res}
+    <div class="row">${btn}</div><div style="margin-top:10px"><b>${isC?'Spirits':'Storage'}</b></div>${list}`);
+}
+function archAct(a,d){
+  const isC = HS.tab==='char', pool = isC ? SAVE.roster : SAVE.items;
+  if (a==='atab'){HS.tab=d.v;HS.keep=HS.cons=null}
+  else if (a==='aclear'){if(d.v==='KEEP')HS.keep=HS.cons=null;else HS.cons=null}
+  else if (a==='apick'){
+    const id=+d.id, keep=pool.find(x=>x.id===HS.keep), x=pool.find(y=>y.id===id);
+    if (!keep) HS.keep=id;
+    else if (id===HS.keep) HS.keep=HS.cons=null;
+    else if (id===HS.cons) HS.cons=null;
+    else if (isC?x.cls===keep.cls:x.type===keep.type) HS.cons=id;
+  }
+  else if (a==='afuse'){
+    const k=pool.find(x=>x.id===HS.keep), c=pool.find(x=>x.id===HS.cons); if(!k||!c) return;
+    if (isC){
+      const cost=fuseCharCost(k); if(SAVE.gold<cost||k.lv>=MAX_LV) return;
+      const from=k.lv; k.lv=fuseLv(k,c); if(!k.title) k.title=c.title;
+      if (c.item) SAVE.items.push(c.item);
+      SAVE.roster.splice(SAVE.roster.indexOf(c),1); if(H) H.spirits=H.spirits.filter(s=>s.r!==c);
+      SAVE.gold-=cost; save(); HS.keep=HS.cons=null; openArchive(); return hubMsg(`${k.name} grows from Lv ${from} to Lv ${k.lv}!`);
+    } else {
+      const cost=fuseItemCost(k,c); if(SAVE.gold<cost||Math.max(k.tier||0,c.tier||0)>=MAX_TIER) return;
+      k.tier=fuseTier(k,c); if(!k.title) k.title=c.title;
+      SAVE.items.splice(SAVE.items.indexOf(c),1); SAVE.gold-=cost; save(); HS.keep=HS.cons=null; openArchive(); return hubMsg(`${OT[k.type].n} is now +${k.tier}!`);
+    }
+  }
+  openArchive();
 }
 
 $('#panel').addEventListener('click', e => {if(MODE==='battle')return;const b=e.target.closest('[data-h]');if(b&&!b.disabled)hubAct(b.dataset.h,b.dataset)});

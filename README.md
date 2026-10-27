@@ -37,8 +37,13 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 - Selling: storage weapons sell for half price (titled ones for 50% more); herbs and tonics for half.
 - Menus now cover the whole screen.
 
+## Stage 4b: Archive fusion (done)
+- Characters: fuse two spirits of the same class. The first one stays and gains 2 levels (3 if the consumed one is the same level or higher), keeps its title (or inherits the other's if it has none). The consumed spirit leaves and its item goes to storage. Cost 60 Bordin x the kept spirit's level. Max level 50. The Warden cannot be fused.
+- Items: fuse two copies of the same item in storage into one with +1 tier (max +5). Each tier adds 2 to every bonus the item gives, and shrinks penalties by 1 (the axe's SPD -4 becomes -2 at +2). Keeps the first item's title, or inherits. Cost 150 Bordin x the result tier.
+- Tiers carry into battle, through stealing and equipping, and back home as loot. They raise sell prices (+60 per tier).
+- Preview of the result before you commit; picking one side dims anything that can't be fused with it.
+
 ## Planned stages
-4b. Archive: fusion of characters and items.
 5. More classes, skills, stages, random dungeons, post-game.
 
 ## Tests
