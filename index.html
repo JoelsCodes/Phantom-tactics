@@ -23,6 +23,13 @@ button:active{transform:translateY(1px)}
 button:disabled{opacity:.38;cursor:default}
 button.pri{background:#2f5d7a;border-color:#4b89b0}
 button.warn{background:#5a2f3a;border-color:#8a4656}
+button.on{border-color:var(--gd);color:var(--gd)}
+.gd{color:var(--gd)}
+.speech{background:#fff;color:#222;border-radius:10px;padding:7px 10px;font-size:12px;margin-bottom:10px}
+.ibox{width:38px;height:38px;border-radius:8px;background:#141a26;flex:none;display:flex;align-items:center;justify-content:center}
+.detail{background:#161c28;border:1px solid var(--ln);border-top:none;border-radius:0 0 10px 10px;padding:8px;margin-top:-4px}
+.who{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--ln);font-size:12px}
+.who i{width:22px;height:22px;border-radius:50%;flex:none}
 button.gold{background:#5b4a1f;border-color:#a3873a}
 .row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .hd{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
@@ -39,7 +46,7 @@ button.gold{background:#5b4a1f;border-color:#a3873a}
 .hint{background:#16304a;border:1px solid #2c5a80;border-radius:8px;padding:6px 8px;font-size:12px;margin-top:6px}
 #sheet{position:absolute;inset:0;background:rgba(6,8,14,.72);display:none;align-items:flex-end;z-index:5}
 #sheet.on{display:flex}
-#sheet .in{background:var(--pn);width:100%;max-height:78%;overflow-y:auto;border-radius:14px 14px 0 0;padding:12px;border-top:1px solid var(--ln)}
+#sheet .in{background:var(--pn);width:100%;max-height:92%;overflow-y:auto;border-radius:14px 14px 0 0;padding:12px;border-top:1px solid var(--ln)}
 .card{display:flex;gap:10px;align-items:center;background:var(--pn2);border:1px solid var(--ln);border-radius:10px;padding:8px;margin-top:6px}
 .card.off{opacity:.4}
 .card .ic{width:36px;height:36px;border-radius:50%;flex:none;border:2px solid rgba(255,255,255,.25)}
@@ -64,9 +71,9 @@ h2{margin:0 0 4px;font-size:18px}
     <canvas id="cv"></canvas>
     <div id="zoom"><button id="zi">+</button><button id="zo">−</button><button id="zc" title="Center">◎</button></div>
     <div id="chart" style="position:absolute;inset:0;display:none;z-index:4;background:#173a5a"></div>
-    <div id="sheet"><div class="in" id="sheetIn"></div></div>
   </div>
   <div id="panel"></div>
+  <div id="sheet"><div class="in" id="sheetIn"></div></div>
   <div id="ov"><div class="in" id="ovIn"></div></div>
 </div>
 <script>
@@ -86,6 +93,8 @@ const OT = {
   barrel: {n:'Barrel',    mods:{atk:.20,def:-.10,mv:.10},          turns:4, w:15, r:11},
   sword:  {n:'Iron Blade',mods:{atk:.25},  turns:4, w:6, r:9,  equip:{atk:14},       skill:'slash'},
   bow:    {n:'Ash Bow',   mods:{spd:.20,mv:.10}, turns:4, w:5, r:9, equip:{atk:8,spd:6}, skill:'arrow'},
+  axe:    {n:'Woodcutter Axe',mods:{atk:.30,spd:-.10}, turns:4, w:9, r:9, equip:{atk:20,spd:-4}, skill:'chop'},
+  spear:  {n:'Reed Spear', mods:{atk:.15,mv:.10}, turns:4, w:7, r:9, equip:{atk:12}, skill:'pierce'},
   staff:  {n:'Oak Staff', mods:{int:.25},  turns:3, w:5, r:9,  equip:{int:14},       skill:'bolt'},
 };
 // Titles: % stat changes. Any unit or object can carry one.
@@ -121,6 +130,8 @@ const SK = {
   hex:   {n:'Hex',       t:'mag', pow:1.0,rng:100,sp:2, kb:0, proj:'#ff7a7a'},
   frost: {n:'Frost Ring',t:'mag', pow:1.0,rng:100,sp:6, kb:0, aoe:45},
   heal:  {n:'Mend',      t:'heal',pow:1.4,rng:100,sp:3},
+  chop:  {n:'Chop',      t:'phys',pow:1.6,rng:34, sp:2, kb:25},
+  pierce:{n:'Pierce',    t:'phys',pow:1.1,rng:60, sp:2, kb:0, line:1},
   steal: {n:'Steal',     t:'steal',rng:32,sp:2},
 };
 
@@ -378,7 +389,7 @@ async function useSkill(u,k,tx,ty,target){
     const x0=u.x,y0=u.y,dx=(target.x-x0)*0.35,dy=(target.y-y0)*0.35;
     await tween(220,t=>{const f=Math.sin(t*Math.PI);u.x=x0+dx*f;u.y=y0+dy*f}); u.x=x0;u.y=y0;
   }
-  const hits = s.aoe ? units().filter(e=>e!==u&&!e.liftedBy&&dist(tx,ty,e.x,e.y)<=s.aoe+e.r) : (target&&alive(target)?[target]:[]);
+  const hits = s.line ? lineHits(u,tx,ty,s.rng) : s.aoe ? units().filter(e=>e!==u&&!e.liftedBy&&dist(tx,ty,e.x,e.y)<=s.aoe+e.r) : (target&&alive(target)?[target]:[]);
   for (const t of hits){
     if (s.t==='heal'){
       const n = Math.round(stat(u,'int')*s.pow*1.2); t.hp=Math.min(stat(t,'hp'),t.hp+n); popup(t.x,t.y,'+'+n,'#8dffa0');
@@ -462,6 +473,10 @@ function tap(sx,sy){
     ents.splice(ents.indexOf(hit),1);
     if (u.held){const it=u.held;const p=findFree(u.x+12,u.y+4,it);it.x=p?p[0]:u.x;it.y=p?p[1]:u.y;ents.push(it)}
     u.held=hit; u.sp=Math.min(u.sp,maxSP(u)); G.mode='idle'; log(u.name+' equipped '+OT[hit.type].n); ui();
+  } else if (mode==='useItem'){
+    if (!hit || hit.k!=='unit' || hit.team!=='p') return flash('Tap yourself or an ally');
+    if (hit!==u && dist(u.x,u.y,hit.x,hit.y)>REACH+hit.r+10) return flash('Too far');
+    G.mode='idle'; act(()=>useItem(u,hit,G.useKey));
   } else if (mode==='confObj'){
     const h=host();
     if (!hit || hit.k!=='obj') return flash('Tap an object');
@@ -525,6 +540,7 @@ function ui(){
       const row=[];
       row.push(`<button data-a="move" ${dis||u.mvLeft<5||u.acted&&u.mvLeft<5?'disabled':''}>Move <span class="mut">${Math.round(u.mvLeft)}</span></button>`);
       for (const k of skills(u)){const s=SK[k];row.push(`<button data-a="sk:${k}" ${dis||u.acted||u.lift||u.sp<s.sp?'disabled':''}>${s.n}${s.sp?` <span class="mut">${s.sp}SP</span>`:''}</button>`)}
+      if (Object.values(SAVE.bag).some(n=>n>0)) row.push(`<button data-a="item" ${dis||u.acted||u.lift?'disabled':''}>Item</button>`);
       if (u.lift) row.push(`<button data-a="throw" ${dis||u.acted?'disabled':''}>Throw</button>`);
       else row.push(`<button data-a="lift" ${dis||u.acted?'disabled':''}>Lift</button>`);
       const nearW = objs().some(o=>OT[o.type].equip&&!o.liftedBy&&dist(u.x,u.y,o.x,o.y)<=REACH+o.r);
@@ -539,7 +555,7 @@ function ui(){
     P.push(`<div class="mut">Tap <b style="color:var(--gd)">${h?h.name:'your Warden'}</b> to confine spirits into objects on the field. Tap a unit to command it, or an object to see what it gives. Drag to look around.</div>`);
   }
   const modeHint={move:'Tap where to move (inside the blue circle).',skill:'Tap a target in range.',lift:'Tap something next to you to lift it.',
-    throw:'Tap where to throw. Outside the island = out of bounds!',equip:'Tap a weapon next to you.',confObj:'Tap an object inside the purple circle.'}[G.mode];
+    throw:'Tap where to throw. Outside the island = out of bounds!',equip:'Tap a weapon next to you.',useItem:'Tap yourself or an ally next to you.',confObj:'Tap an object inside the purple circle.'}[G.mode];
   if (modeHint && !G.pending) P.push(`<div class="hint">${modeHint} <button data-a="cancel" style="padding:3px 8px;margin-left:6px">Cancel</button></div>`);
   if (G.flash) P.push(`<div class="hint" style="border-color:#8a4656;background:#3a1f28">${G.flash}</div>`);
   if (G.phase==='player') P.push(`<div class="row"><button class="warn" data-a="end" ${busy?'disabled':''}>End Phase</button>${u&&G.sel!==h&&h?`<button data-a="selHost">Select ${h.name}</button>`:''}</div>`);
@@ -559,6 +575,7 @@ $('#panel').addEventListener('click', e => {
   else if (a==='equip') G.mode='equip';
   else if (a==='done'){u.acted=true;u.mvLeft=0;G.mode='idle';G.sel=null}
   else if (a==='confine'){openRoster();return}
+  else if (a==='item'){openBag();return}
   else if (a==='doConf'){const sp=G.pendingSpirit,o=G.pending;G.pending=null;G.mode='idle';const nu=confine(sp,o);G.sel=nu}
   ui();
 });
@@ -574,6 +591,7 @@ function openRoster(){
 $('#sheet').addEventListener('click', e => {
   if (e.target.id==='sheet' || e.target.closest('[data-x=close]')){$('#sheet').classList.remove('on');return}
   if (MODE==='hub'){const b=e.target.closest('[data-h]');if(b&&!b.disabled)hubAct(b.dataset.h,b.dataset);return}
+  const ub=e.target.closest('[data-u]'); if (ub){G.mode='useItem';G.useKey=ub.dataset.u;$('#sheet').classList.remove('on');ui();return}
   const c=e.target.closest('.card'); if(!c||c.classList.contains('off')) return;
   G.pendingSpirit=ROSTER[+c.dataset.i]; G.mode='confObj'; G.pending=null; $('#sheet').classList.remove('on'); ui();
 });
@@ -585,7 +603,7 @@ function showEnd(){
   $('#ovIn').innerHTML = `<h2>${win?'Stage Clear!':'Defeat'}</h2>
     <p>${win?'All foes are gone from '+STAGE.name+'.':'Your Warden has fallen.'}</p>
     <p class="mut">Turns: ${G.turn} · Spirits confined: ${G.stats.confined} · Foes defeated: ${G.stats.defeated} (out of bounds: ${G.stats.ob}) · Items stolen: ${G.stats.stolen}</p>
-    ${win?`<p>Reward: <b style="color:var(--gd)">${STAGE.reward} Bordin</b></p><p>Spoils carried home: ${spoils.length?spoils.join(', '):'<span class="mut">none</span>'}</p>`:'<p class="mut">Your spirits and items are as they were before you set sail. EXP earned is kept.</p>'}
+    ${win?`<p>Reward: <b style="color:var(--gd)">${STAGE.reward} Bordin</b></p><p>Spoils carried home: ${spoils.length?spoils.join(', '):'<span class="mut">none</span>'}</p>`:'<p class="mut">Your spirits and items are as they were before you set sail. EXP earned is kept; herbs and tonics you used are gone.</p>'}
     ${expTxt}<div class="row"><button class="pri" id="again">Return to the island</button></div>`;
   $('#ov').classList.add('on'); $('#again').onclick = settle;
 }
@@ -628,7 +646,7 @@ function draw(now){
     ell(u.x,u.y,u.r+4,'#ffffff',null,2);
     if (G.mode==='move') ell(u.x,u.y,u.mvLeft,'#7fd6ff','rgba(127,214,255,.12)',2);
     if (G.mode==='skill'){const s=SK[G.skill];ell(u.x,u.y,s.rng,'#ffa64d','rgba(255,166,77,.10)',2);}
-    if (G.mode==='lift'||G.mode==='equip') ell(u.x,u.y,REACH+12,'#ffe27a','rgba(255,226,122,.10)',2);
+    if (G.mode==='lift'||G.mode==='equip'||G.mode==='useItem') ell(u.x,u.y,REACH+12,'#ffe27a','rgba(255,226,122,.10)',2);
     if (G.mode==='throw') ell(u.x,u.y,throwRange(u),'#ff7a7a','rgba(255,122,122,.08)',2,[6,5]);
   }
   if (G.mode==='confObj' && h){
@@ -674,6 +692,8 @@ function drawWeapon(t,sx,sy,z,ground){
   cx.save();cx.translate(sx,sy);if(ground)cx.rotate(-0.6);
   if (t==='sword'){cx.strokeStyle='#dfe6ef';cx.lineWidth=3*z;cx.beginPath();cx.moveTo(0,-12*z);cx.lineTo(0,6*z);cx.stroke();cx.strokeStyle='#b08a3e';cx.beginPath();cx.moveTo(-4*z,3*z);cx.lineTo(4*z,3*z);cx.stroke()}
   if (t==='bow'){cx.strokeStyle='#a07040';cx.lineWidth=2.5*z;cx.beginPath();cx.arc(0,0,9*z,-1.3,1.3);cx.stroke();cx.strokeStyle='#ddd';cx.lineWidth=1;cx.beginPath();cx.moveTo(Math.cos(-1.3)*9*z,Math.sin(-1.3)*9*z);cx.lineTo(Math.cos(1.3)*9*z,Math.sin(1.3)*9*z);cx.stroke()}
+  if (t==='axe'){cx.strokeStyle='#8a6a40';cx.lineWidth=2.5*z;cx.beginPath();cx.moveTo(0,10*z);cx.lineTo(0,-12*z);cx.stroke();cx.fillStyle='#c9d2dc';cx.beginPath();cx.moveTo(0,-12*z);cx.quadraticCurveTo(9*z,-12*z,8*z,-3*z);cx.lineTo(0,-6*z);cx.closePath();cx.fill()}
+  if (t==='spear'){cx.strokeStyle='#8a6a40';cx.lineWidth=2*z;cx.beginPath();cx.moveTo(0,12*z);cx.lineTo(0,-14*z);cx.stroke();cx.fillStyle='#dfe6ef';cx.beginPath();cx.moveTo(-3*z,-14*z);cx.lineTo(0,-21*z);cx.lineTo(3*z,-14*z);cx.closePath();cx.fill()}
   if (t==='staff'){cx.strokeStyle='#8a6a40';cx.lineWidth=2.5*z;cx.beginPath();cx.moveTo(0,-12*z);cx.lineTo(0,10*z);cx.stroke();cx.fillStyle='#9fe0ff';cx.beginPath();cx.arc(0,-13*z,3.5*z,0,6.283);cx.fill()}
   cx.restore();
 }
@@ -829,11 +849,12 @@ function newSave(){
   const add = (name,cls,lv,title='') => s.roster.push({id:s.nid++,name,cls,lv,title,item:null});
   add('Brannoc','Soldier',4,'Sturdy'); add('Ysolde','Archer',3); add('Mirelle','Witch',3,'Sage'); add('Tamsin','Healer',3); add('Quill','Rogue',3,'Thief');
   s.items.push({id:s.nid++,type:'sword',title:''});
+  s.bag = {herb:3,tonic:1};
   return s;
 }
 function loadSave(){
   if (/reset/.test(location.search)) return newSave();
-  try {const s=JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.v===1){s.cleared=s.cleared||{};return s}} catch(e) {}
+  try {const s=JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.v===1){s.cleared=s.cleared||{};s.bag=s.bag||{herb:0,tonic:0};return s}} catch(e) {}
   return newSave();
 }
 function save(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(SAVE))}catch(e){}}
@@ -872,7 +893,7 @@ const HUB_POLY = [[30,170],[90,90],[210,70],[330,90],[385,190],[370,320],[290,38
 const HUB_CENTER = [312,380];
 const BLD = [
   {id:'soul', n:'Soulwright', what:'Create characters', x:152,y:240, col:'#c79bff', kind:'hut',  hi:'Name a shape, and I will call a spirit into it.'},
-  {id:'trade',n:'Trader',     what:'Shop',              x:464,y:216, col:'#f2c85b', kind:'stall',hi:'Still unpacking my crates. Come back soon!'},
+  {id:'trade',n:'Trader',     what:'Shop',              x:464,y:216, col:'#f2c85b', kind:'stall',hi:'Fresh stock off the boat! Have a look.'},
   {id:'title',n:'Titlesmith', what:'Move titles',       x:528,y:416, col:'#ff9b6b', kind:'forge',hi:'Bring me a title and something to put it on.'},
   {id:'arch', n:'Archive',    what:'Fusion',            x:112,y:480, col:'#7fd6ff', kind:'tower',hi:'The old books are still being sorted.'},
   {id:'ferry',n:'Ferry',      what:'Set sail',          x:320,y:576, col:'#8fe3a0', kind:'dock', hi:'Wind is good. Where to, Warden?'},
@@ -1037,6 +1058,7 @@ function openBuilding(b){
   else if (b.id==='title'){HS={b,src:null,dst:null};openTitles()}
   else if (b.id==='house'){HS={b,sel:null,rel:false};openHouse()}
   else if (b.id==='ferry') openChart();
+  else if (b.id==='trade'){HS={b,tab:'buy',sel:'sword',qty:1,say:b.hi};openShop()}
   else sheet(b,`<p class="mut">Opens in a later update.</p>`);
 }
 const maxCreateLv = () => Math.max(SAVE.host.lv,...SAVE.roster.map(r=>r.lv));
@@ -1138,11 +1160,124 @@ function hubAct(a,d){
       SAVE.roster.splice(SAVE.roster.indexOf(c),1); H.spirits=H.spirits.filter(s=>s.r!==c); save();
       HS.sel=null; HS.rel=false; openHouse(); return hubMsg(`${c.name} has left the island.`);
     }
+    case 'stab': case 'ssel': case 'q-': case 'q+': case 'buy': case 'buyeq': case 'sell': case 'sellc': return shopAct(a,d);
     case 'sail': return startBattle(STAGES[C.sel]);
     case 'clist': C.list=!C.list; return chartUI();
     case 'cback': return closeChart();
   }
 }
+// ===================== SHOP =====================
+const CONS = {herb:{n:'Healing Herb',d:'Heals 40 HP',hp:40,price:40}, tonic:{n:'Spirit Tonic',d:'Restores 10 SP',sp:10,price:90}};
+const PRICE = {sword:240,axe:320,spear:280,bow:260,staff:300};
+const STOCK = ['sword','axe','spear','bow','staff','herb','tonic'];
+const sellPrice = it => Math.floor((PRICE[it.type]||100)/2*(it.title?1.5:1));
+const ICON = {
+  sword:'<svg width="30" height="30" viewBox="0 0 30 30"><path d="M22 4 L10 16" stroke="#dfe6ef" stroke-width="4" stroke-linecap="round"/><path d="M8 13 L15 20" stroke="#b08a3e" stroke-width="3"/><path d="M9 19 L5 23" stroke="#6b4a2e" stroke-width="3"/></svg>',
+  axe:'<svg width="30" height="30" viewBox="0 0 30 30"><path d="M8 26 L20 8" stroke="#8a6a40" stroke-width="3"/><path d="M17 4 q10 2 7 12 l-8 -6z" fill="#c9d2dc"/></svg>',
+  spear:'<svg width="30" height="30" viewBox="0 0 30 30"><path d="M5 27 L22 8" stroke="#8a6a40" stroke-width="2.5"/><path d="M20 4 l6 0 0 6 -5 1z" fill="#dfe6ef"/></svg>',
+  bow:'<svg width="30" height="30" viewBox="0 0 30 30"><path d="M8 4 q16 11 0 22" stroke="#a07040" stroke-width="3" fill="none"/><path d="M8 4 L8 26" stroke="#ddd" stroke-width="1"/></svg>',
+  staff:'<svg width="30" height="30" viewBox="0 0 30 30"><path d="M10 27 L19 8" stroke="#8a6a40" stroke-width="3"/><circle cx="20" cy="6" r="4" fill="#9fe0ff"/></svg>',
+  herb:'<svg width="30" height="30" viewBox="0 0 30 30"><path d="M15 26 V12" stroke="#3f8a3a" stroke-width="2"/><ellipse cx="10" cy="12" rx="5" ry="3" fill="#6fbf5a"/><ellipse cx="20" cy="10" rx="5" ry="3" fill="#6fbf5a"/></svg>',
+  tonic:'<svg width="30" height="30" viewBox="0 0 30 30"><rect x="12" y="4" width="6" height="5" fill="#ccc"/><path d="M10 9 h10 l2 15 q0 3 -3 3 h-8 q-3 0 -3 -3z" fill="#7fa8ff"/></svg>',
+};
+const TRADER_SVG = `<svg width="84" height="84" viewBox="0 0 90 90" style="flex:none"><ellipse cx="45" cy="86" rx="28" ry="4" fill="#0005"/><rect x="24" y="44" width="42" height="40" rx="10" fill="#c98a3a"/><circle cx="45" cy="32" r="16" fill="#f1d3b8"/><path d="M27 28 q18 -26 36 0z" fill="#3a6a5a"/><rect x="25" y="26" width="40" height="5" fill="#2a5a4a"/><circle cx="39" cy="33" r="2" fill="#333"/><circle cx="51" cy="33" r="2" fill="#333"/><path d="M38 41 q7 5 14 0" stroke="#7a4a3a" stroke-width="2" fill="none"/><rect x="10" y="66" width="70" height="20" fill="#7a5a3a"/></svg>`;
+const itemLine = t => CONS[t] ? CONS[t].d+' · use in battle' : Object.entries(OT[t].equip).map(([k,v])=>SL[k]+' '+(v>0?'+':'−')+Math.abs(v)).join(' ')+' · '+SK[OT[t].skill].n;
+const isCaster = c => c.cls==='Witch' || c.cls==='Healer';
+// How each character would change if they held a new weapon of type t, best match first.
+function whoGains(t){
+  const chars = [SAVE.host,...SAVE.roster];
+  return chars.map((c,i)=>{
+    const a = charUnit(c,{team:'p'}), b = charUnit({...c,item:{type:t,title:''}},{team:'p'});
+    const d = ['atk','int','spd','def','mv'].map(k=>[k,stat(b,k)-stat(a,k)]).filter(([,v])=>v);
+    const gain = skills(b).filter(k=>!skills(a).includes(k));
+    const da = stat(b,'atk')-stat(a,'atk'), di = stat(b,'int')-stat(a,'int');
+    return {c,i,d,gain,score:isCaster(c)?di+da*0.2:da+di*0.2,main:stat(b,isCaster(c)?'int':'atk')};
+  }).sort((x,y)=>(y.score-x.score)||(y.main-x.main));
+}
+function openShop(){
+  const P = [`<div class="row" style="align-items:flex-end;flex-wrap:nowrap">${TRADER_SVG}<div class="speech">${HS.say}</div></div>`,
+    `<div class="row"><button data-h="stab" data-v="buy" class="${HS.tab==='buy'?'on':''}">Buy</button><button data-h="stab" data-v="sell" class="${HS.tab==='sell'?'on':''}">Sell</button><span style="flex:1"></span><span class="mut">You have <b class="gd">${SAVE.gold.toLocaleString()}</b> Bordin</span></div>`];
+  if (HS.tab==='buy'){
+    for (const k of STOCK){
+      const name = CONS[k]?CONS[k].n:OT[k].n, price = CONS[k]?CONS[k].price:PRICE[k], sel = HS.sel===k;
+      P.push(`<div class="card" data-h="ssel" data-v="${k}" style="${sel?'border-color:var(--gd)':''}"><div class="ibox">${ICON[k]}</div><div class="tx"><b>${name}</b><div class="mut">${itemLine(k)}</div></div><b class="gd">${price}</b></div>`);
+      if (!sel) continue;
+      if (CONS[k]){
+        const cost = price*HS.qty;
+        P.push(`<div class="detail"><div class="mut">You have ${SAVE.bag[k]||0}. Any character can use it on themselves or an ally next to them, instead of attacking.</div>
+          <div class="row"><button data-h="q-" ${HS.qty<=1?'disabled':''}>−</button><b style="min-width:30px;text-align:center">${HS.qty}</b><button data-h="q+">+</button>
+          <button class="pri" style="flex:1" data-h="buy" ${SAVE.gold<cost?'disabled':''}>Buy ${HS.qty} for ${cost}</button></div></div>`);
+      } else {
+        const rows = whoGains(k).map(w=>`<div class="who"><i style="background:${CL[w.c.cls].col}"></i><div style="flex:1;min-width:0"><b>${w.c.name}</b> <span class="mut">${w.c.cls}${w.c.item?' · holds '+itemName(w.c.item):''}</span>
+          <div>${w.d.map(([s,v])=>`<span class="${v>0?'up':'dn'}">${SL[s]} ${v>0?'+':'−'}${Math.abs(v)}</span>`).join(' ')||'<span class="mut">no change</span>'}${w.gain.length?` <span class="ttl">+${w.gain.map(g=>SK[g].n).join(', ')}</span>`:''}</div></div>
+          <button data-h="buyeq" data-i="${w.i}" ${SAVE.gold<price?'disabled':''}>Equip</button></div>`).join('');
+        P.push(`<div class="detail"><div class="mut">A spirit confined into it gets ${modList(OT[k].mods)}. If equipped on…</div>${rows}
+          <div class="row"><button class="pri" style="flex:1" data-h="buy" ${SAVE.gold<price?'disabled':''}>Buy for ${price} (to storage)</button></div></div>`);
+      }
+    }
+  } else {
+    const bagKeys = Object.keys(CONS).filter(k=>SAVE.bag[k]>0);
+    if (!SAVE.items.length && !bagKeys.length) P.push('<p class="mut">Nothing to sell. Equipped items have to be unequipped at your house first.</p>');
+    SAVE.items.forEach((it,i)=>P.push(`<div class="card"><div class="ibox">${ICON[it.type]}</div><div class="tx"><b>${OT[it.type].n}</b>${it.title?` <span class="ttl">★ ${it.title}</span>`:''}<div class="mut">${itemLine(it.type)}</div></div><button data-h="sell" data-i="${i}">Sell ${sellPrice(it)}</button></div>`));
+    for (const k of bagKeys) P.push(`<div class="card"><div class="ibox">${ICON[k]}</div><div class="tx"><b>${CONS[k].n}</b> <span class="mut">×${SAVE.bag[k]}</span><div class="mut">${CONS[k].d}</div></div><button data-h="sellc" data-v="${k}">Sell 1 for ${Math.floor(CONS[k].price/2)}</button></div>`);
+    if (SAVE.items.length) P.push('<p class="mut">Titled items sell for 50% more. Equipped items have to be unequipped at your house first.</p>');
+  }
+  $('#sheetIn').innerHTML = `<h2>Trader</h2>${P.join('')}<div class="row"><button data-x="close">Close</button></div>`;
+  $('#sheet').classList.add('on');
+  hubUI();
+}
+function shopAct(a,d){
+  const k = HS.sel;
+  if (a==='stab'){HS.tab=d.v}
+  else if (a==='ssel'){HS.sel=d.v;HS.qty=1}
+  else if (a==='q-') HS.qty=Math.max(1,HS.qty-1);
+  else if (a==='q+') HS.qty=Math.min(99,HS.qty+1);
+  else if (a==='buy'){
+    const cost = CONS[k] ? CONS[k].price*HS.qty : PRICE[k];
+    if (SAVE.gold<cost){HS.say='Come back with more Bordin, friend.'}
+    else {
+      SAVE.gold -= cost;
+      if (CONS[k]) SAVE.bag[k] = (SAVE.bag[k]||0)+HS.qty; else SAVE.items.push({id:SAVE.nid++,type:k,title:''});
+      HS.say = CONS[k] ? `${HS.qty} ${CONS[k].n}${HS.qty>1?'s':''}, coming right up.` : `One ${OT[k].n}. It's in your storage.`;
+      save();
+    }
+  }
+  else if (a==='buyeq'){
+    const c = [SAVE.host,...SAVE.roster][+d.i];
+    if (SAVE.gold<PRICE[k]){HS.say='Come back with more Bordin, friend.'}
+    else {SAVE.gold-=PRICE[k]; if(c.item) SAVE.items.push(c.item); c.item={id:SAVE.nid++,type:k,title:''}; HS.say=`${c.name} looks good with that ${OT[k].n}.`; save()}
+  }
+  else if (a==='sell'){const it=SAVE.items.splice(+d.i,1)[0]; if(it){SAVE.gold+=sellPrice(it); HS.say=`I'll find that ${OT[it.type].n} a good home.`; save()}}
+  else if (a==='sellc'){if(SAVE.bag[d.v]>0){SAVE.bag[d.v]--; SAVE.gold+=Math.floor(CONS[d.v].price/2); HS.say='Always happy to restock.'; save()}}
+  openShop();
+}
+
+// ===================== BATTLE ITEMS =====================
+function openBag(){
+  const keys = Object.keys(CONS).filter(k=>SAVE.bag[k]>0);
+  $('#sheetIn').innerHTML = `<h2>Use an item</h2><div class="mut">Pick one, then tap ${G.sel.name} or an ally next to them. Using an item takes this unit's action.</div>`+
+    keys.map(k=>`<div class="card" data-u="${k}"><div class="ibox">${ICON[k]}</div><div class="tx"><b>${CONS[k].n}</b> <span class="mut">×${SAVE.bag[k]}</span><div class="mut">${CONS[k].d}</div></div></div>`).join('')+
+    `<div class="row"><button data-x="close">Close</button></div>`;
+  $('#sheet').classList.add('on');
+}
+async function useItem(u,t,k){
+  const c = CONS[k]; if (!SAVE.bag[k]) return;
+  SAVE.bag[k]--; save(); u.acted = true;
+  if (c.hp){const n=Math.min(c.hp,stat(t,'hp')-t.hp); t.hp+=n; popup(t.x,t.y,'+'+n+' HP','#8dffa0')}
+  if (c.sp){const n=Math.min(c.sp,maxSP(t)-t.sp); t.sp+=n; popup(t.x,t.y,'+'+n+' SP','#9fc4ff')}
+  log(u.name+' used '+c.n+(t!==u?' on '+t.name:''));
+  await wait(300);
+}
+// Units on the line from u towards (tx,ty), up to rng away, nearest first.
+function lineHits(u,tx,ty,rng){
+  const d = dist(u.x,u.y,tx,ty)||1, dx = (tx-u.x)/d, dy = (ty-u.y)/d;
+  return units().filter(e=>{
+    if (e===u || e.liftedBy) return false;
+    const px = e.x-u.x, py = e.y-u.y, along = px*dx+py*dy, off = Math.abs(px*dy-py*dx);
+    return along>0 && along<=rng+e.r && off<=e.r+6;
+  }).sort((a,b)=>dist(u.x,u.y,a.x,a.y)-dist(u.x,u.y,b.x,b.y));
+}
+
 $('#panel').addEventListener('click', e => {if(MODE==='battle')return;const b=e.target.closest('[data-h]');if(b&&!b.disabled)hubAct(b.dataset.h,b.dataset)});
 $('#chart').addEventListener('click', e => {const g=e.target.closest('[data-s]');if(!g)return;const i=+g.dataset.s;if(!unlocked(i))return;C.sel=i;chartUI()});
 $('#sheet').addEventListener('input', e => {if(e.target.id==='cname')HS.name=e.target.value});

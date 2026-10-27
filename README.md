@@ -30,8 +30,15 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 - EXP: the unit that defeats a foe gets EXP (more for bosses and higher-level foes; knocking or throwing out of bounds counts). On a win, the Warden and every confined spirit also get a bonus. EXP is kept even when you lose.
 - Level-ups show on the results screen; the house shows an EXP bar.
 
+## Stage 4a: shop and battle items (done)
+- Trader: Buy and Sell tabs. Tap an item to see how every character would change if they held it, best match first, with an Equip button on each row (buys it and hands it over; their old item goes to storage).
+- New weapons: Woodcutter Axe (ATK +20, SPD -4, Chop: heavy hit with knockback) and Reed Spear (ATK +12, Pierce: hits every unit in a line).
+- Healing Herb (40 HP) and Spirit Tonic (10 SP), bought in any quantity. In battle, the Item button uses one on yourself or an ally next to you, and takes your action.
+- Selling: storage weapons sell for half price (titled ones for 50% more); herbs and tonics for half.
+- Menus now cover the whole screen.
+
 ## Planned stages
-4. Shop, item inventory, title transfer between items/characters, fusion.
+4b. Archive: fusion of characters and items.
 5. More classes, skills, stages, random dungeons, post-game.
 
 ## Tests
