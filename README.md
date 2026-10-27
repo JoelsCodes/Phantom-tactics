@@ -8,7 +8,7 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 - Confine: the Warden fights alone and confines spirits into objects on the field. A spirit takes on the object's stat bonuses and its title. Every stage allows 8 confines, and each spirit can be used once per battle.
 - Turn limits: each object gives a set number of turns (rock 6, tree 5, barrel 4, flower 3). When time runs out the spirit leaves, the object is used up, and held items drop.
 - Titles on units, objects and items change stats.
-- Lift & throw objects, allies and foes. Landing outside the island = out of bounds. Knockback skills can push foes off.
+- Lift & throw objects, allies and foes. Landing outside the island (or being knocked past the edge) is out of bounds: a unit takes 30% of its max HP and is put back on the island edge, so it only dies if that hit is enough. Objects that go out of bounds are lost.
 - Lift a foe who is holding a weapon to try to steal it (any class; Rogues and Thief-titled units are better at it). It keeps its title and gives its skill to the thief.
 - Lift a weapon on the field to equip it. Items held at the end of a battle are kept (shown on the results screen).
 - Enemy AI, a boss, win/lose screens.
