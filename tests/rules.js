@@ -52,6 +52,35 @@ const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1 } 
     await fallOut(r); return { n, after: objs().length, has: objs().includes(r) };
   });
   ok(!o.has && o.after === o.n - 1, 'an object that goes out of bounds is lost');
+  // Equipped items that go out of bounds come back to storage after a win; ground weapons nobody on your team held do not.
+  const r = await p.evaluate(async () => {
+    newBattle(); await new Promise(r => setTimeout(r, 100));
+    SAVE.roster[0].item = { id: SAVE.nid++, type: 'axe', title: 'Fierce', tier: 2 }; SAVE.items = [];
+    newBattle(); await new Promise(r => setTimeout(r, 100));
+    const y = confine(ROSTER[0], objs().find(o => !OT[o.type].equip)), axe = y.held;
+    y.held = null; axe.x = 40; axe.y = 100; ents.push(axe);
+    await fallOut(axe, y);                                   // equipped by your team: returns
+    const wild = objs().find(o => OT[o.type].equip && !o.mine); await fallOut(wild);   // never yours: gone
+    const stolen = units('e').find(e => e.held), thief = y;
+    const sw = stolen.held; stolen.held = null; thief.held = sw; sw.mine = true; thief.held = null; sw.x = 40; sw.y = 100; ents.push(sw);
+    await fallOut(sw, y);                                    // stolen then lost: returns
+    return { lost: G.lost.map(l => l.type + ':' + l.title + ':' + l.tier), wildType: wild.type };
+  });
+  ok(r.lost.includes('axe:Fierce:2') && r.lost.length === 2 && !r.lost.some(l => l.startsWith(r.wildType + ':') && l !== r.lost[1]), 'only items your team equipped are marked for return (' + r.lost.join(', ') + ')');
+  await p.evaluate(() => { for (const e of units('e')) removeUnit(e); checkEnd() });
+  ok(await p.evaluate(() => /Returned from out of bounds/.test(document.querySelector('#ovIn').textContent)), 'results screen lists what was returned');
+  await p.click('#again');
+  const back = await p.evaluate(() => SAVE.items.map(i => i.type + ':' + i.title + ':' + (i.tier || 0)));
+  ok(back.includes('axe:Fierce:2'), 'the lost axe is back in storage with its title and tier (' + back.join(', ') + ')');
+  // On a loss nothing is taken from the save at all.
+  const loss = await p.evaluate(async () => {
+    SAVE.roster[0].item = { id: SAVE.nid++, type: 'spear', title: '', tier: 0 };
+    newBattle(); await new Promise(r => setTimeout(r, 100));
+    const y = confine(ROSTER[0], objs().find(o => !OT[o.type].equip)), sp = y.held; y.held = null; sp.x = 40; sp.y = 100; ents.push(sp);
+    await fallOut(sp, y); removeUnit(host()); checkEnd(); document.querySelector('#again').click();
+    return SAVE.roster[0].item && SAVE.roster[0].item.type;
+  });
+  ok(loss === 'spear', 'after a loss the spirit still owns its spear');
   ok(errs.length === 0, 'no page errors' + (errs.length ? ': ' + errs.join(' | ') : ''));
   await b.close();
 })();
