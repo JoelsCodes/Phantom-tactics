@@ -48,7 +48,7 @@ Checked against public descriptions of the original game (search summaries only,
 - Turns are now individual and ordered by SPD, not "your phase / enemy phase". A bar at the top of the field shows the next 8 turns. Only the active unit can be commanded; tap others to inspect them. The Turn counter counts the Warden's turns.
 - A spirit's turn limit counts its own turns. After its last turn it leaves, and it cannot be confined again that battle. A newly confined spirit acts right after the Warden's turn.
 - Lift does three things: equips a weapon on the ground, steals from an armed foe, or lifts anything else (which can then be thrown). The separate Equip button and the Rogue's Steal skill are gone; Rogues have Jab instead.
-- Set by the owner: out of bounds hurts but does not kill; 8 confines per map; weapons your team had equipped (including ones stolen from foes) that go out of bounds come back to storage after a win. The 30% damage is a guess.
+- Set by the owner: out of bounds hurts but does not kill; 8 confines per map; weapons your team had equipped (including ones stolen from foes) that go out of bounds are put back on the character who held them after a win (a second lost item, or anything they picked up since, goes to storage). The 30% damage is a guess.
 - Still to check against the original: boss immunity to out-of-bounds, weight rules, EXP and level-up formulas, shop prices, fusion and title rules.
 
 ## Planned stages
