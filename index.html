@@ -67,6 +67,9 @@ h2{margin:0 0 4px;font-size:18px}
 #dock button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;font-size:12px}
 #dock button i{width:20px;height:20px;border-radius:50%;display:block}
 #dock button.near{border-color:var(--gd)}
+.tqc{width:26px;height:26px;border-radius:50%;border:2px solid;display:flex;align-items:center;justify-content:center;font:700 11px system-ui;color:#10131c;opacity:.9}
+.tqc.cur{width:32px;height:32px;opacity:1;box-shadow:0 0 8px #f2c85b88}
+#tq{position:absolute;left:8px;top:8px;display:flex;gap:4px;align-items:center;z-index:2;pointer-events:none}
 .clbl{font:600 11px system-ui;fill:#fff;paint-order:stroke;stroke:#000;stroke-width:3px}
 #log{font-size:11px;color:var(--mut);margin-top:8px;max-height:48px;overflow:hidden}
 </style>
@@ -76,6 +79,7 @@ h2{margin:0 0 4px;font-size:18px}
   <div id="top"></div>
   <div id="wrap">
     <canvas id="cv"></canvas>
+    <div id="tq"></div>
     <div id="zoom"><button id="zi">+</button><button id="zo">−</button><button id="zc" title="Center">◎</button></div>
     <div id="chart" style="position:absolute;inset:0;display:none;z-index:4;background:#173a5a"></div>
   </div>
@@ -122,7 +126,7 @@ const CL = {
   Archer:  {b:{hp:50,atk:13,def:7, int:6, res:8, spd:12,mv:85}, sk:['punch','arrow'], col:'#8fe3a0'},
   Witch:   {b:{hp:42,atk:5, def:5, int:17,res:13,spd:10,mv:75}, sk:['bolt','frost'],  col:'#c79bff'},
   Healer:  {b:{hp:48,atk:6, def:7, int:14,res:15,spd:9, mv:80}, sk:['punch','heal'],  col:'#f4f1e6'},
-  Rogue:   {b:{hp:48,atk:11,def:7, int:6, res:7, spd:16,mv:105},sk:['punch','steal'], col:'#ffb070'},
+  Rogue:   {b:{hp:48,atk:11,def:7, int:6, res:7, spd:16,mv:105},sk:['punch','jab'],   col:'#ffb070'},
   Mossling:{b:{hp:46,atk:12,def:9, int:4, res:6, spd:8, mv:70}, sk:['punch'],        col:'#6fbf5a'},
   Thornbat:{b:{hp:32,atk:11,def:5, int:6, res:7, spd:14,mv:110},sk:['spit'],         col:'#9a6bd0'},
   Hexcap:  {b:{hp:40,atk:6, def:6, int:15,res:12,spd:9, mv:65}, sk:['hex'],          col:'#d0605a'},
@@ -141,7 +145,7 @@ const SK = {
   heal:  {n:'Mend',      t:'heal',pow:1.4,rng:100,sp:3},
   chop:  {n:'Chop',      t:'phys',pow:1.6,rng:34, sp:2, kb:25},
   pierce:{n:'Pierce',    t:'phys',pow:1.1,rng:60, sp:2, kb:0, line:1},
-  steal: {n:'Steal',     t:'steal',rng:32,sp:2},
+  jab:   {n:'Jab',       t:'phys',pow:1.2,rng:32, sp:2, kb:0},
 };
 
 let ISLAND = ISLAND1;
@@ -212,11 +216,11 @@ function newBattle(st=STAGES[0]){
   ents.push(h);
   for (const [t,x,y,ti] of STAGE.objs) ents.push(mkObj(t,x,y,ti||''));
   for (const f of STAGE.foes) ents.push(mkUnit({...f,team:'e'}));
-  G = {turn:0,phase:'player',confLeft:STAGE.conf,used:{},sel:null,mode:'idle',pending:null,over:null,
+  G = {turn:0,time:0,act:null,phase:'player',confLeft:STAGE.conf,used:{},sel:null,mode:'idle',pending:null,over:null,
        stats:{confined:0,ob:0,stolen:0,defeated:0},log:[],exp:{},expDone:0,ups:[]};
   cam.x = h.x+90; cam.y = h.y-40; camT = null;
   $('#ov').classList.remove('on');
-  startPlayerPhase();
+  initQueue(); advance();
 }
 function log(s){G.log.unshift(s);G.log.length=Math.min(G.log.length,6)}
 
@@ -272,34 +276,46 @@ function tween(ms,f){return new Promise(res=>{anims.push({t0:performance.now(),m
 function popup(x,y,s,col='#fff'){fx.push({type:'txt',x,y,s,col,t0:performance.now(),ms:1000*Math.max(FAST,.3)})}
 async function banner(s){G.banner={s,t0:performance.now()};await wait(900);G.banner=null}
 
-// ===================== PHASES =====================
-function startPlayerPhase(){
-  G.phase='player'; G.turn++;
-  for (const u of units('p')){
-    if (!u.host && G.turn>1){
-      u.turns--;
-      if (u.turns<=0){removeUnit(u,'returned to the spirit realm');continue}
-    }
-    u.mvLeft = stat(u,'mv'); u.acted = false;
+// ===================== TURNS =====================
+// Individual turns ordered by SPD, like the original: a unit's next turn comes 100/SPD after its last one.
+const turnGap = u => 100/stat(u,'spd');
+const before = (a,b) => a.t-b.t || (a.u.team==='p'?-1:1)-(b.u.team==='p'?-1:1) || a.u.id-b.u.id;
+function initQueue(){G.time=0;G.act=null;for(const u of units())u.t=u.host?0:turnGap(u)}
+function nextUnit(){return units().filter(u=>!u.liftedBy).map(u=>({u,t:u.t})).sort(before)[0]?.u}
+// The next n turns including the current one, for the turn-order bar. Phantoms drop out when their turns run out.
+function peekQueue(n){
+  const sim = units().filter(u=>!u.liftedBy).map(u=>({u,t:Math.max(u.t,G.time),left:u.host||u.team==='e'?Infinity:u.turns}));
+  const out = [];
+  while (out.length<n && sim.length){
+    sim.sort(before); const f = sim[0];
+    out.push(f.u); f.t += turnGap(f.u); f.left--;
+    if (f.left<=0) sim.shift();
   }
-  G.sel=null; G.mode='idle'; G.pending=null;
-  banner('Turn '+G.turn+' · Your Phase');
-  ui();
+  return out;
 }
-async function enemyPhase(){
-  G.phase='enemy'; G.sel=null; G.mode='idle'; G.pending=null; busy=true; ui();
-  await banner('Enemy Phase');
-  for (const e of units('e')){
-    if (!alive(e) || G.over) continue;
-    e.mvLeft = stat(e,'mv'); e.acted = false;
-    if (e.liftedBy) continue;
-    focus(e); await wait(250);
-    await aiAct(e);
-    if (checkEnd()) {busy=false;ui();return}
+async function advance(){
+  if (checkEnd()) return;
+  const u = nextUnit(); if (!u) return;
+  G.time = Math.max(G.time,u.t); if (u.host) G.turn++;
+  G.act = u; G.sel = u; G.mode = 'idle'; G.pending = null; G.flash = null;
+  u.mvLeft = stat(u,'mv'); u.acted = false;
+  focus(u);
+  if (u.team==='e'){
+    G.phase = 'enemy'; busy = true; ui();
+    try { await wait(300); await aiAct(u) } finally { busy = false }
+    return endTurn();
   }
-  busy=false;
-  startPlayerPhase();
-  const h=host(); if(h) focus(h);
+  G.phase = 'player'; busy = false; ui();
+}
+async function endTurn(){
+  if (G.over) return;
+  const u = G.act;
+  G.mode = 'idle'; G.pending = null;
+  if (u && alive(u)){
+    u.t = Math.max(u.t,G.time) + turnGap(u);
+    if (u.team==='p' && !u.host){u.turns--; if (u.turns<=0) removeUnit(u,'returned to the spirit realm')}
+  }
+  return advance();
 }
 function bestAttack(e,sks,targets,x,y){
   for (const s of sks) {
@@ -382,7 +398,7 @@ function calcDmg(a,d,s){
   return Math.max(1, Math.round((A*s.pow*1.6 - D*0.8)*(0.9+Math.random()*0.2)));
 }
 const hitChance = (a,d) => clamp(90+(stat(a,'spd')-stat(d,'spd'))*2,50,100);
-const stealChance = (a,d) => clamp(40+(stat(a,'spd')-stat(d,'spd'))*3+(a.title==='Thief'?20:0),10,95);
+const stealChance = (a,d) => clamp(40+(stat(a,'spd')-stat(d,'spd'))*3+(a.title==='Thief'?20:0)+(a.cls==='Rogue'?15:0),10,95);
 
 async function useSkill(u,k,tx,ty,target){
   const s = SK[k];
@@ -402,13 +418,6 @@ async function useSkill(u,k,tx,ty,target){
   for (const t of hits){
     if (s.t==='heal'){
       const n = Math.round(stat(u,'int')*s.pow*1.2); t.hp=Math.min(stat(t,'hp'),t.hp+n); popup(t.x,t.y,'+'+n,'#8dffa0');
-    } else if (s.t==='steal'){
-      if (!t.held){popup(t.x,t.y,'Nothing to steal','#ccc');continue}
-      if (Math.random()*100 < stealChance(u,t)){
-        const it=t.held; t.held=null; t.hp=Math.min(t.hp,stat(t,'hp'));
-        if (!u.held){u.held=it}else{const p=findFree(u.x+14,u.y,it);if(p){it.x=p[0];it.y=p[1];ents.push(it)}}
-        G.stats.stolen++; popup(t.x,t.y,'Stole '+OT[it.type].n+'!','#ffcf5b'); log(u.name+' stole '+(it.title?it.title+' ':'')+OT[it.type].n);
-      } else popup(t.x,t.y,'Steal failed','#ccc');
     } else {
       if (s.t==='phys' && Math.random()*100 > hitChance(u,t)){popup(t.x,t.y,'Miss','#ccc');continue}
       damage(t,calcDmg(u,t,s),u);
@@ -416,6 +425,24 @@ async function useSkill(u,k,tx,ty,target){
     }
   }
   await wait(250);
+}
+// Lifting from an armed foe tries to steal its weapon (the original has no separate steal skill).
+async function stealFrom(u,t){
+  u.acted = true; log(u.name+' tried to steal from '+t.name);
+  const x0=u.x,y0=u.y,dx=(t.x-x0)*0.3,dy=(t.y-y0)*0.3;
+  await tween(200,f=>{const k=Math.sin(f*Math.PI);u.x=x0+dx*k;u.y=y0+dy*k}); u.x=x0;u.y=y0;
+  if (!t.held){popup(t.x,t.y,'Nothing to steal','#ccc')}
+  else if (Math.random()*100 < stealChance(u,t)){
+    const it=t.held; t.held=null; t.hp=Math.min(t.hp,stat(t,'hp'));
+    if (!u.held){u.held=it}else{const p=findFree(u.x+14,u.y,it);if(p){it.x=p[0];it.y=p[1];ents.push(it)}}
+    G.stats.stolen++; popup(t.x,t.y,'Stole '+OT[it.type].n+'!','#ffcf5b'); log(u.name+' stole '+itemName(it));
+  } else popup(t.x,t.y,'Steal failed','#ccc');
+  await wait(250);
+}
+function equipFrom(u,w){
+  ents.splice(ents.indexOf(w),1);
+  if (u.held){const it=u.held;const p=findFree(u.x+12,u.y+4,it);it.x=p?p[0]:u.x;it.y=p?p[1]:u.y;ents.push(it)}
+  u.held=w; u.sp=Math.min(u.sp,maxSP(u)); log(u.name+' equipped '+itemName(w));
 }
 function canLift(u,e){
   if (e===u||e.liftedBy||e.lift||u.lift) return false;
@@ -439,7 +466,7 @@ function confine(sp,obj){
   const u = charUnit(sp,{team:'p',x:obj.x,y:obj.y});
   u.obj = obj; u.hp = stat(u,'hp'); u.sp = maxSP(u);
   u.turns = OT[obj.type].turns + (obj.title==='Elder'?1:0);
-  u.r = 12; u.mvLeft = stat(u,'mv'); u.acted=false;
+  u.r = 12; u.mvLeft = stat(u,'mv'); u.acted=false; u.t = G.time+0.01;
   ents.splice(ents.indexOf(obj),1); ents.push(u);
   G.used[sp.id]=1; G.confLeft--; G.stats.confined++;
   popup(u.x,u.y,'Confined!','#a8e6ff');
@@ -465,23 +492,18 @@ function tap(sx,sy){
     } else {
       if (!hit || hit.k!=='unit' || hit===u) return flash('Tap a unit');
       if (dist(u.x,u.y,hit.x,hit.y)>s.rng+hit.r) return flash('Out of range');
-      if (s.t==='steal' && !hit.held) return flash('Nothing to steal');
       G.mode='idle'; act(()=>useSkill(u,G.skill,hit.x,hit.y,hit));
     }
   } else if (mode==='lift'){
     if (!hit || hit===u) return flash('Tap something next to you');
     if (dist(u.x,u.y,hit.x,hit.y)>REACH+hit.r) return flash('Too far');
+    if (hit.k==='obj' && OT[hit.type].equip){equipFrom(u,hit);G.mode='idle';ui();return}
+    if (hit.k==='unit' && hit.team!==u.team && hit.held){G.mode='idle';act(()=>stealFrom(u,hit));return}
     if (!canLift(u,hit)) return flash('Too heavy');
     u.lift=hit; hit.liftedBy=u; hit.x=u.x; hit.y=u.y; G.mode='idle'; log(u.name+' lifted '+(hit.name||OT[hit.type].n)); ui();
   } else if (mode==='throw'){
     if (dist(u.x,u.y,wx,wy)>throwRange(u)) return flash('Too far');
     G.mode='idle'; act(()=>throwAt(u,wx,wy));
-  } else if (mode==='equip'){
-    if (!hit || hit.k!=='obj' || !OT[hit.type].equip) return flash('Tap a weapon');
-    if (dist(u.x,u.y,hit.x,hit.y)>REACH+hit.r) return flash('Too far');
-    ents.splice(ents.indexOf(hit),1);
-    if (u.held){const it=u.held;const p=findFree(u.x+12,u.y+4,it);it.x=p?p[0]:u.x;it.y=p?p[1]:u.y;ents.push(it)}
-    u.held=hit; u.sp=Math.min(u.sp,maxSP(u)); G.mode='idle'; log(u.name+' equipped '+OT[hit.type].n); ui();
   } else if (mode==='useItem'){
     if (!hit || hit.k!=='unit' || hit.team!=='p') return flash('Tap yourself or an ally');
     if (hit!==u && dist(u.x,u.y,hit.x,hit.y)>REACH+hit.r+10) return flash('Too far');
@@ -492,7 +514,7 @@ function tap(sx,sy){
     if (dist(h.x,h.y,hit.x,hit.y)>CONF_RANGE) return flash('Out of confine range');
     G.pending=hit; ui();
   } else {
-    G.sel = hit; G.pending=null; ui();
+    G.sel = hit || G.act; G.pending=null; ui();
   }
 }
 let flashT;
@@ -531,12 +553,13 @@ function ui(){
   if (MODE==='chart') return chartUI();
   const h=host();
   $('#top').innerHTML = `<span class="chip">${STAGE.name}</span><span class="chip">Turn <b>${G.turn}</b></span>
-    <span class="chip">${G.phase==='player'?'Your phase':'Enemy phase'}</span><span class="sp"></span>
+    <span class="chip">${G.act?G.act.name+'\'s turn':''}</span><span class="sp"></span>
     <span class="chip">Confine <b>${G.confLeft}</b>/${STAGE.conf}</span><span class="chip">Foes <b>${units('e').length}</b></span>
     <button id="help" style="padding:3px 9px">?</button>`;
   $('#help').onclick = showHelp;
   const P=[], u=G.sel;
-  if (G.phase!=='player'){P.push('<div class="mut">Enemy phase…</div>')}
+  $('#tq').innerHTML = peekQueue(8).map((q,i)=>`<span class="tqc ${i?'':'cur'}" style="background:${CL[q.cls].col};border-color:${q.team==='e'?'#e06060':q.host?'#f2c85b':'#7fd6ff'}">${q.name[0]}</span>`).join('');
+  if (G.phase!=='player'){P.push(`<div class="mut">${G.act?G.act.name+' is acting…':''}</div>`)}
   else if (G.pending){
     const o=G.pending, sp=G.pendingSpirit, prev=charUnit(sp,{team:'p'}); prev.obj=o; prev.hp=stat(prev,'hp'); prev.sp=maxSP(prev);
     P.push(`<div class="mut">Preview: ${sp.name} confined into ${o.title?o.title+' ':''}${OT[o.type].n}</div>`+unitInfo({...prev,turns:OT[o.type].turns+(o.title==='Elder'?1:0)}));
@@ -544,7 +567,8 @@ function ui(){
   }
   else if (u && u.k==='unit'){
     P.push(unitInfo(u));
-    if (u.team==='p' && alive(u)){
+    if (u!==G.act && u.team==='p') P.push(`<div class="mut" style="margin-top:6px">${u.name} acts later. See the turn order at the top of the field.</div>`);
+    if (u===G.act && alive(u)){
       const dis = busy||!!u.liftedBy;
       const row=[];
       row.push(`<button data-a="move" ${dis||u.mvLeft<5||u.acted&&u.mvLeft<5?'disabled':''}>Move <span class="mut">${Math.round(u.mvLeft)}</span></button>`);
@@ -552,37 +576,32 @@ function ui(){
       if (Object.values(SAVE.bag).some(n=>n>0)) row.push(`<button data-a="item" ${dis||u.acted||u.lift?'disabled':''}>Item</button>`);
       if (u.lift) row.push(`<button data-a="throw" ${dis||u.acted?'disabled':''}>Throw</button>`);
       else row.push(`<button data-a="lift" ${dis||u.acted?'disabled':''}>Lift</button>`);
-      const nearW = objs().some(o=>OT[o.type].equip&&!o.liftedBy&&dist(u.x,u.y,o.x,o.y)<=REACH+o.r);
-      if (nearW) row.push(`<button data-a="equip" ${dis?'disabled':''}>Equip</button>`);
       if (u.host) row.push(`<button class="gold" data-a="confine" ${busy||!G.confLeft?'disabled':''}>Confine</button>`);
-      row.push(`<button data-a="done" ${dis||(u.acted&&u.mvLeft<5)?'disabled':''}>Wait</button>`);
       P.push('<div class="row">'+row.join('')+'</div>');
     }
   }
   else if (u && u.k==='obj'){P.push(objInfo(u))}
   else {
-    P.push(`<div class="mut">Tap <b style="color:var(--gd)">${h?h.name:'your Warden'}</b> to confine spirits into objects on the field. Tap a unit to command it, or an object to see what it gives. Drag to look around.</div>`);
+    P.push(`<div class="mut">Units act one at a time in the order shown at the top of the field. Tap a unit or object to inspect it. Drag to look around.</div>`);
   }
-  const modeHint={move:'Tap where to move (inside the blue circle).',skill:'Tap a target in range.',lift:'Tap something next to you to lift it.',
-    throw:'Tap where to throw. Outside the island = out of bounds!',equip:'Tap a weapon next to you.',useItem:'Tap yourself or an ally next to you.',confObj:'Tap an object inside the purple circle.'}[G.mode];
+  const modeHint={move:'Tap where to move (inside the blue circle).',skill:'Tap a target in range.',lift:'Tap a weapon to equip it, an armed foe to steal from, or anything else to lift it.',
+    throw:'Tap where to throw. Outside the island = out of bounds!',useItem:'Tap yourself or an ally next to you.',confObj:'Tap an object inside the purple circle.'}[G.mode];
   if (modeHint && !G.pending) P.push(`<div class="hint">${modeHint} <button data-a="cancel" style="padding:3px 8px;margin-left:6px">Cancel</button></div>`);
   if (G.flash) P.push(`<div class="hint" style="border-color:#8a4656;background:#3a1f28">${G.flash}</div>`);
-  if (G.phase==='player') P.push(`<div class="row"><button class="warn" data-a="end" ${busy?'disabled':''}>End Phase</button>${u&&G.sel!==h&&h?`<button data-a="selHost">Select ${h.name}</button>`:''}</div>`);
+  if (G.phase==='player') P.push(`<div class="row"><button class="warn" data-a="end" ${busy?'disabled':''}>End turn</button>${u&&G.act&&u!==G.act?`<button data-a="selHost">Back to ${G.act.name}</button>`:''}</div>`);
   P.push(`<div id="log">${G.log.slice(0,3).join('<br>')}</div>`);
   $('#panel').innerHTML = P.join('');
 }
 $('#panel').addEventListener('click', e => {
   const b=e.target.closest('button[data-a]'); if(!b||b.disabled) return;
   const a=b.dataset.a, u=G.sel;
-  if (a==='end'){G.mode='idle';G.pending=null;enemyPhase();return}
+  if (a==='end'){if(busy||G.phase!=='player')return;endTurn();return}
   if (a==='cancel'){G.mode='idle';G.pending=null;ui();return}
-  if (a==='selHost'){G.sel=host();G.mode='idle';focus(G.sel);ui();return}
+  if (a==='selHost'){G.sel=G.act;G.mode='idle';focus(G.sel);ui();return}
   if (a==='move') G.mode='move';
   else if (a.startsWith('sk:')){G.mode='skill';G.skill=a.slice(3)}
   else if (a==='lift') G.mode='lift';
   else if (a==='throw') G.mode='throw';
-  else if (a==='equip') G.mode='equip';
-  else if (a==='done'){u.acted=true;u.mvLeft=0;G.mode='idle';G.sel=null}
   else if (a==='confine'){openRoster();return}
   else if (a==='item'){openBag();return}
   else if (a==='doConf'){const sp=G.pendingSpirit,o=G.pending;G.pending=null;G.mode='idle';const nu=confine(sp,o);G.sel=nu}
@@ -619,11 +638,12 @@ function showEnd(){
 function showHelp(){
   $('#ovIn').innerHTML = `<h2>How to play</h2>
   <p><b>Confine:</b> your Warden fights alone. Select them, tap <b>Confine</b>, pick a spirit, then tap an object nearby. The spirit takes that object's stat bonuses and its title. Each battle has a limited number of confines.</p>
-  <p><b>Turn limit:</b> spirits only last a few turns (rocks last long, flowers short). When time runs out they leave and the object is used up.</p>
+  <p><b>Turn order:</b> every unit takes its own turn, in order of SPD (see the circles at the top). Faster units act more often. Tap End turn when you are done.</p>
+  <p><b>Turn limit:</b> a spirit has a set number of its own turns (rocks give more, flowers fewer). After its last turn it leaves, and it cannot be confined again this battle.</p>
   <p><b>Free movement:</b> no grid. Move anywhere inside your blue circle; you can split movement before and after acting.</p>
   <p><b>Lift & throw:</b> lift objects, allies or foes next to you, then throw them. Anything that lands outside the island is out of bounds and gone. Knockback can push foes off too.</p>
-  <p><b>Steal:</b> rogues can take the item a foe is holding, which removes its bonus from them.</p>
-  <p><b>Equip:</b> pick up weapons on the field for a new skill and stats. Items held at the end of the battle are kept.</p>
+  <p><b>Steal:</b> Lift a foe who is holding a weapon to try to take it. Faster units and Rogues succeed more often, and the foe loses its bonus.</p>
+  <p><b>Equip:</b> Lift a weapon on the field to equip it for a new skill and stats. Items held at the end of the battle are kept.</p>
   <div class="row"><button class="pri" id="hc">Got it</button></div>`;
   $('#ov').classList.add('on'); $('#hc').onclick=()=>{$('#ov').classList.remove('on');if(G.over)showEnd()};
 }
@@ -655,7 +675,7 @@ function draw(now){
     ell(u.x,u.y,u.r+4,'#ffffff',null,2);
     if (G.mode==='move') ell(u.x,u.y,u.mvLeft,'#7fd6ff','rgba(127,214,255,.12)',2);
     if (G.mode==='skill'){const s=SK[G.skill];ell(u.x,u.y,s.rng,'#ffa64d','rgba(255,166,77,.10)',2);}
-    if (G.mode==='lift'||G.mode==='equip'||G.mode==='useItem') ell(u.x,u.y,REACH+12,'#ffe27a','rgba(255,226,122,.10)',2);
+    if (G.mode==='lift'||G.mode==='useItem') ell(u.x,u.y,REACH+12,'#ffe27a','rgba(255,226,122,.10)',2);
     if (G.mode==='throw') ell(u.x,u.y,throwRange(u),'#ff7a7a','rgba(255,122,122,.08)',2,[6,5]);
   }
   if (G.mode==='confObj' && h){
@@ -667,6 +687,7 @@ function draw(now){
   // entities, back to front; carried things drawn on top of their carrier
   const list = ents.filter(e=>!e.liftedBy).sort((a,b)=>a.y-b.y);
   for (const e of list){ drawEnt(e,0); if (e.lift) drawEnt(e.lift,34, e) }
+  { const a=G.act; if (a && alive(a) && !a.liftedBy){const [sx,sy]=w2s(a.x,a.y,62+Math.sin(now/200)*3);cx.fillStyle=a.team==='p'?'#f2c85b':'#ff7a7a';cx.beginPath();cx.moveTo(sx,sy+8);cx.lineTo(sx-6,sy-2);cx.lineTo(sx+6,sy-2);cx.fill()} }
   // effects
   for (let i=fx.length-1;i>=0;i--){
     const f=fx[i];
@@ -736,7 +757,7 @@ function drawUnit(u,sx,sy,z){
   cx.fillStyle=enemy?'#e06060':'#6fd38a';cx.fillRect(sx-bw/2,by,bw*clamp(u.hp/stat(u,'hp'),0,1),3);
   if (spirit){cx.fillStyle='#16304a';cx.beginPath();cx.arc(sx+bw/2+6,by+1,6.5,0,6.283);cx.fill();cx.strokeStyle='#7fd6ff';cx.lineWidth=1;cx.stroke();cx.fillStyle='#bfeaff';cx.font='bold 9px system-ui';cx.textAlign='center';cx.fillText(u.turns,sx+bw/2+6,by+4)}
   if (u.boss){cx.fillStyle='#f2c85b';cx.font='bold 10px system-ui';cx.textAlign='center';cx.fillText('BOSS',sx,by-4)}
-  if (u.team==='p'&&G.phase==='player'&&u.acted&&u.mvLeft<5){cx.fillStyle='rgba(255,255,255,.7)';cx.font='9px system-ui';cx.textAlign='center';cx.fillText('done',sx,sy+10*z)}
+  if (u===G.act&&G.phase==='player'&&u.acted&&u.mvLeft<5){cx.fillStyle='rgba(255,255,255,.7)';cx.font='9px system-ui';cx.textAlign='center';cx.fillText('done',sx,sy+10*z)}
 }
 function eyes(sx,sy,z,col){cx.fillStyle=col;cx.beginPath();cx.arc(sx-3.5*z,sy,1.8*z,0,6.283);cx.arc(sx+3.5*z,sy,1.8*z,0,6.283);cx.fill()}
 
@@ -893,7 +914,7 @@ function settle(){
 }
 function startBattle(st){
   $('#sheet').classList.remove('on'); $('#chart').style.display='none';
-  MODE = 'battle'; $('#zoom').style.display = '';
+  MODE = 'battle'; $('#zoom').style.display = ''; $('#tq').style.display = 'flex';
   newBattle(st);
 }
 
@@ -918,7 +939,7 @@ const CLASS_INFO = {
   Archer: {cost:120,d:'Hits from far away with arrows.'},
   Witch:  {cost:150,d:'Strong magic. Frost Ring hits an area.'},
   Healer: {cost:150,d:'Mends allies. Tough against magic.'},
-  Rogue:  {cost:140,d:'Fast mover. Steals held items.'},
+  Rogue:  {cost:140,d:'Fast mover. Best at stealing weapons from armed foes.'},
 };
 const createCost = (cls,lv) => Math.round(CLASS_INFO[cls].cost*lv*(lv+1)/2);
 const TITLE_COST = 200;
@@ -939,7 +960,7 @@ function toHub(at){
   const [x,y] = at ? door(at) : door(BLD.find(b=>b.id==='house'));
   H = {hero:{x,y,tx:null,ty:null,step:0}, joy:null, pd:null, near:null, open:null, msg:null, info:null, last:0, spirits:hubSpirits()};
   cam.x = x; cam.y = y;
-  $('#zoom').style.display = 'none'; $('#ov').classList.remove('on'); $('#sheet').classList.remove('on');
+  $('#zoom').style.display = 'none'; $('#tq').style.display = 'none'; $('#ov').classList.remove('on'); $('#sheet').classList.remove('on');
   hubUI();
 }
 function hubStep(dt){

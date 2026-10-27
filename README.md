@@ -9,8 +9,8 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 - Turn limits: each object gives a set number of turns (rock 6, tree 5, barrel 4, flower 3). When time runs out the spirit leaves, the object is used up, and held items drop.
 - Titles on units, objects and items change stats.
 - Lift & throw objects, allies and foes. Landing outside the island = out of bounds. Knockback skills can push foes off.
-- Steal a foe's held item; it keeps its title and gives its skill to the thief.
-- Equip weapons found on the field. Items held at the end of a battle are kept (shown on the results screen).
+- Lift a foe who is holding a weapon to try to steal it (any class; Rogues and Thief-titled units are better at it). It keeps its title and gives its skill to the thief.
+- Lift a weapon on the field to equip it. Items held at the end of a battle are kept (shown on the results screen).
 - Enemy AI, a boss, win/lose screens.
 
 ## Stage 2: island hub (done)
@@ -42,6 +42,13 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 - Items: fuse two copies of the same item in storage into one with +1 tier (max +5). Each tier adds 2 to every bonus the item gives, and shrinks penalties by 1 (the axe's SPD -4 becomes -2 at +2). Keeps the first item's title, or inherits. Cost 150 Bordin x the result tier.
 - Tiers carry into battle, through stealing and equipping, and back home as loot. They raise sell prices (+60 per tier).
 - Preview of the result before you commit; picking one side dims anything that can't be fused with it.
+
+## Fidelity pass 1: turn order and Lift (done)
+Checked against public descriptions of the original game (search summaries only, not the game itself):
+- Turns are now individual and ordered by SPD, not "your phase / enemy phase". A bar at the top of the field shows the next 8 turns. Only the active unit can be commanded; tap others to inspect them. The Turn counter counts the Warden's turns.
+- A spirit's turn limit counts its own turns. After its last turn it leaves, and it cannot be confined again that battle. A newly confined spirit acts right after the Warden's turn.
+- Lift does three things: equips a weapon on the ground, steals from an armed foe, or lifts anything else (which can then be thrown). The separate Equip button and the Rogue's Steal skill are gone; Rogues have Jab instead.
+- Still to check against the original: boss immunity to out-of-bounds, per-map confine caps, weight rules, EXP and level-up formulas, shop prices, fusion and title rules.
 
 ## Planned stages
 5. More classes, skills, stages, random dungeons, post-game.

@@ -44,7 +44,7 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast&reset'
     const hx = units('e').find(e => e.cls === 'Hexcap');
     q.x = hx.x - 25; q.y = hx.y;
     let tries = 0;
-    while (hx.held && tries < 40) { q.acted = false; q.sp = 99; await useSkill(q, 'steal', hx.x, hx.y, hx); tries++ }
+    while (hx.held && tries < 40) { q.acted = false; q.sp = 99; await stealFrom(q, hx); tries++ }
     return { qHeld: q.held && q.held.type, hxHeld: !!hx.held, title: q.held && q.held.title, skills: skills(q) };
   });
   ok(st.qHeld === 'staff' && !st.hxHeld, 'steal moves the staff from Hexcap to Quill');
@@ -63,26 +63,26 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast&reset'
   });
   ok(th.after === th.before - 1 && th.ob === 1, 'thrown enemy lands out of bounds and is removed');
 
-  // Equip the bow from the ground.
+  // Lift the bow from the ground: lifting a weapon equips it.
   const eq = await p.evaluate(() => {
     const y = confine(ROSTER[1], objs().find(o => o.type === 'flower' && o.title === 'Sage'));
     const bow = objs().find(o => o.type === 'bow');
-    y.x = bow.x + 20; y.y = bow.y; G.sel = y; ui();
-    const btn = document.querySelector('[data-a=equip]');
-    if (!btn) return 'no equip button';
+    y.x = bow.x + 20; y.y = bow.y; G.act = y; G.sel = y; G.phase = 'player'; busy = false; ui();
+    const btn = document.querySelector('[data-a=lift]');
+    if (!btn) return 'no lift button';
     btn.click();
     tap(...w2s(bow.x, bow.y));
     return { held: y.held && y.held.type, onField: objs().includes(bow) };
   });
-  ok(eq.held === 'bow' && !eq.onField, 'equip picks up the bow');
+  ok(eq.held === 'bow' && !eq.onField, 'lifting the bow equips it');
   await p.waitForTimeout(200);
   await p.screenshot({ path: out + '/3-mid.png' });
 
-  // Turn limit: end phases until the Moonbloom spirit (3 turns) leaves.
+  // Turn limit: keep ending turns until the Moonbloom spirit (3 of her own turns) leaves.
   const tl = await p.evaluate(async () => {
     const y = units('p').find(u => u.name === 'Ysolde');
     const turns0 = y.turns;
-    for (let i = 0; i < 3 && !G.over; i++) { await enemyPhase() }
+    for (let i = 0; i < 80 && !G.over && alive(y); i++) { await endTurn() }
     return { turns0, gone: !units('p').includes(y), bowDropped: objs().some(o => o.type === 'bow'), over: G.over };
   });
   ok(tl.over || (tl.turns0 === 3 && tl.gone), 'flower spirit leaves after its 3 turns');
@@ -93,21 +93,23 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast&reset'
   const res = await p.evaluate(async () => {
     newBattle();
     let guard = 0;
-    while (!G.over && guard++ < 40) {
-      const h = host();
-      // confine whoever is free into the nearest objects
-      for (const s of ROSTER) {
-        if (!G.confLeft || G.used[s.id] || !host()) break;
-        const o = objs().filter(o => !o.liftedBy && dist(h.x, h.y, o.x, o.y) <= CONF_RANGE).sort((a, b) => b.x - a.x)[0];
-        if (!o) break;
-        confine(s, o);
+    while (!G.over && guard++ < 600) {
+      const u = G.act;
+      if (!u || u.team !== 'p') { await new Promise(r => setTimeout(r, 10)); continue }
+      if (u.host) {
+        // confine whoever is free into the nearest objects
+        for (const s of ROSTER) {
+          if (!G.confLeft || G.used[s.id]) break;
+          const o = objs().filter(o => !o.liftedBy && dist(u.x, u.y, o.x, o.y) <= CONF_RANGE).sort((a, b) => b.x - a.x)[0];
+          if (!o) break;
+          confine(s, o);
+        }
       }
-      for (const u of units('p')) {
-        if (!alive(u) || G.over) continue;
+      {
         const foes = units('e').filter(e => !e.liftedBy); if (!foes.length) break;
         const t = foes.sort((a, b) => dist(u.x, u.y, a.x, a.y) - dist(u.x, u.y, b.x, b.y))[0];
         const sk = skills(u).map(k => ({ k, ...SK[k] })).filter(s => (s.t === 'phys' || s.t === 'mag') && u.sp >= s.sp).sort((a, b) => b.pow - a.pow);
-        if (!sk.length) continue;
+        if (!sk.length) { await endTurn(); continue }
         let s = sk.find(s => dist(u.x, u.y, t.x, t.y) <= s.rng + t.r);
         if (!s && !u.host) {
           const d = dist(u.x, u.y, t.x, t.y), step = Math.min(u.mvLeft, d - 25);
@@ -118,7 +120,7 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast&reset'
         if (s) await useSkill(u, s.k, t.x, t.y, t);
         if (checkEnd()) break;
       }
-      if (!G.over) await enemyPhase();
+      await endTurn();
     }
     return { over: G.over, turn: G.turn, stats: G.stats };
   });

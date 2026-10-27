@@ -74,14 +74,14 @@ const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1 } 
   // Auto-play the last stage a few turns to make sure generated foes and objects behave.
   const ap = await p.evaluate(async () => {
     startBattle(STAGES[6]);
-    for (let t = 0; t < 3 && !G.over; t++) {
+    for (let g = 0; g < 200 && G.turn < 4 && !G.over; g++) {
       const h = host();
-      for (const s of ROSTER) { if (!G.confLeft || G.used[s.id]) continue; const o = objs().filter(o => dist(h.x, h.y, o.x, o.y) <= CONF_RANGE)[0]; if (o) confine(s, o) }
-      await enemyPhase();
+      if (G.act.host) for (const s of ROSTER) { if (!G.confLeft || G.used[s.id]) continue; const o = objs().filter(o => dist(h.x, h.y, o.x, o.y) <= CONF_RANGE)[0]; if (o) confine(s, o) }
+      await endTurn();
     }
     return { turn: G.turn, over: G.over, foes: units('e').length };
   });
-  ok(ap.turn >= 2, 'Ashen Spire plays through enemy phases (' + JSON.stringify(ap) + ')');
+  ok(ap.turn >= 2, 'Ashen Spire plays through several turns of enemy and spirit actions (' + JSON.stringify(ap) + ')');
   await p.screenshot({ path: out + '/chart-5-spire.png' });
   ok(errs.length === 0, 'no page errors' + (errs.length ? ': ' + errs.join(' | ') : ''));
   await b.close();
