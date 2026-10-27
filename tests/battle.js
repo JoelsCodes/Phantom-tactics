@@ -36,7 +36,7 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast&reset'
   const c = await p.evaluate(() => { const u = units('p').find(u => u.name === 'Brannoc'); return u && { turns: u.turns, def: stat(u, 'def'), base: u.b.def, conf: G.confLeft } });
   ok(c && c.turns === 6, 'confined spirit has rock turn limit (6)');
   ok(c && c.def > c.base * 1.4, 'rock + Sturdy titles raise DEF (' + c.base + ' -> ' + c.def + ')');
-  ok(c && c.conf === 5, 'confine count decreased');
+  ok(c && c.conf === 7, 'confine count decreased from 8');
 
   // Steal: confine Quill, move next to Hexcap and steal its staff (retry until success to test the transfer).
   const st = await p.evaluate(async () => {
@@ -55,13 +55,14 @@ const url = 'file://' + path.join(__dirname, '..', 'index.html') + '?fast&reset'
     const m = confine(ROSTER[3], objs().find(o => o.type === 'tree' && o.title === 'Elder'));
     const bat = units('e').find(e => e.cls === 'Thornbat');
     m.x = bat.x - 20; m.y = bat.y; m.b.atk = 40;
-    const before = units('e').length;
+    const max = stat(bat, 'hp'), n0 = units('e').length;
     if (!canLift(m, bat)) return 'cannot lift';
     m.lift = bat; bat.liftedBy = m;
     await throwAt(m, 600, 100);
-    return { before, after: units('e').length, ob: G.stats.ob };
+    return { n0, n1: units('e').length, alive: units('e').includes(bat), lost: max - bat.hp, max, inside: inIsland(bat.x, bat.y), free: !bat.liftedBy && bat.falling == null, ob: G.stats.ob, defeated: G.stats.defeated };
   });
-  ok(th.after === th.before - 1 && th.ob === 1, 'thrown enemy lands out of bounds and is removed');
+  ok(th.alive && th.n1 === th.n0 && th.ob === 1 && th.defeated === 0, 'thrown enemy is not killed by going out of bounds');
+  ok(th.lost === Math.round(th.max * 0.3) && th.inside && th.free, 'it takes 30% max HP and is put back on the island (' + th.lost + '/' + th.max + ')');
 
   // Lift the bow from the ground: lifting a weapon equips it.
   const eq = await p.evaluate(() => {

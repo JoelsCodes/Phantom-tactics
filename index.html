@@ -152,8 +152,9 @@ let ISLAND = ISLAND1;
 let STAGE;
 // Spirits you can confine this battle: your island roster (set in newBattle).
 let ROSTER = [];
+const CONFINES = 8; // confines per battle, every stage
 const STAGE1 = {
-  name:'Mossy Hollow', conf:6, reward:600,
+  name:'Mossy Hollow', conf:CONFINES, reward:600,
   host:{name:'Wren',cls:'Warden',lv:3,x:140,y:340},
   objs:[['tree',105,230,'Hardy'],['rock',180,270,'Sturdy'],['barrel',225,330,'Fierce'],['flower',190,410,'Sage'],
         ['flower',110,400],['rock',250,420],['tree',230,170],['bow',150,300],['sword',280,280,'Swift'],
@@ -383,14 +384,26 @@ async function knock(u,fromX,fromY,kb,src){
   const p = findFree(nx,ny,u,0) || [x0,y0];
   await tween(200,t=>{u.x=x0+(p[0]-x0)*t;u.y=y0+(p[1]-y0)*t});
 }
+// Units that go out of bounds take a hit and are put back at the nearest spot on the island. Objects are lost.
+const OB_DMG = 0.3;
+function edgeSpot(x,y,self){
+  const c = ISLAND.reduce((a,[px,py])=>[a[0]+px/ISLAND.length,a[1]+py/ISLAND.length],[0,0]);
+  const d = dist(x,y,c[0],c[1]) || 1;
+  for (let k=0;k<=d;k+=4){const px=x+(c[0]-x)/d*k, py=y+(c[1]-y)/d*k; if (inIsland(px,py,10)){const p=findFree(px,py,self,10); if (p) return p}}
+  return c;
+}
 async function fallOut(e,src){
   popup(e.x,e.y,'OUT OF BOUNDS!','#ffcf5b');
   e.falling = 0;
   await tween(500,t=>{e.falling=t});
   if (e.k==='unit'){
-    if (e.team==='e'){G.stats.ob++;G.stats.defeated++;giveExp(src,e)}
-    if (e.host){e.hp=0}
-    removeUnit(e,'fell out of bounds');
+    if (e.team==='e') G.stats.ob++;
+    damage(e,Math.max(1,Math.round(stat(e,'hp')*OB_DMG)),src);
+    if (!alive(e)) return;
+    const [px,py] = edgeSpot(e.x,e.y,e);
+    e.x = px; e.y = py; e.falling = null;
+    if (e.lift){e.lift.x=px;e.lift.y=py}
+    log(e.name+' was knocked out of bounds and back onto the island');
   } else { ents.splice(ents.indexOf(e),1); log(OT[e.type].n+' fell out of bounds') }
 }
 function calcDmg(a,d,s){
@@ -585,7 +598,7 @@ function ui(){
     P.push(`<div class="mut">Units act one at a time in the order shown at the top of the field. Tap a unit or object to inspect it. Drag to look around.</div>`);
   }
   const modeHint={move:'Tap where to move (inside the blue circle).',skill:'Tap a target in range.',lift:'Tap a weapon to equip it, an armed foe to steal from, or anything else to lift it.',
-    throw:'Tap where to throw. Outside the island = out of bounds!',useItem:'Tap yourself or an ally next to you.',confObj:'Tap an object inside the purple circle.'}[G.mode];
+    throw:'Tap where to throw. Outside the island = out of bounds: it hurts, and they land back on the edge.',useItem:'Tap yourself or an ally next to you.',confObj:'Tap an object inside the purple circle.'}[G.mode];
   if (modeHint && !G.pending) P.push(`<div class="hint">${modeHint} <button data-a="cancel" style="padding:3px 8px;margin-left:6px">Cancel</button></div>`);
   if (G.flash) P.push(`<div class="hint" style="border-color:#8a4656;background:#3a1f28">${G.flash}</div>`);
   if (G.phase==='player') P.push(`<div class="row"><button class="warn" data-a="end" ${busy?'disabled':''}>End turn</button>${u&&G.act&&u!==G.act?`<button data-a="selHost">Back to ${G.act.name}</button>`:''}</div>`);
@@ -630,7 +643,7 @@ function showEnd(){
   const expTxt=G.ups.length?'<p>'+G.ups.map(u=>`${u.name} +${u.gain} EXP${u.to>u.from?` <b class="up">Lv ${u.from} → ${u.to}!</b>`:''}`).join('<br>')+'</p>':'';
   $('#ovIn').innerHTML = `<h2>${win?'Stage Clear!':'Defeat'}</h2>
     <p>${win?'All foes are gone from '+STAGE.name+'.':'Your Warden has fallen.'}</p>
-    <p class="mut">Turns: ${G.turn} · Spirits confined: ${G.stats.confined} · Foes defeated: ${G.stats.defeated} (out of bounds: ${G.stats.ob}) · Items stolen: ${G.stats.stolen}</p>
+    <p class="mut">Turns: ${G.turn} · Spirits confined: ${G.stats.confined} · Foes defeated: ${G.stats.defeated} · Sent out of bounds: ${G.stats.ob} · Items stolen: ${G.stats.stolen}</p>
     ${win?`<p>Reward: <b style="color:var(--gd)">${STAGE.reward} Bordin</b></p><p>Spoils carried home: ${spoils.length?spoils.join(', '):'<span class="mut">none</span>'}</p>`:'<p class="mut">Your spirits and items are as they were before you set sail. EXP earned is kept; herbs and tonics you used are gone.</p>'}
     ${expTxt}<div class="row"><button class="pri" id="again">Return to the island</button></div>`;
   $('#ov').classList.add('on'); $('#again').onclick = settle;
@@ -641,7 +654,7 @@ function showHelp(){
   <p><b>Turn order:</b> every unit takes its own turn, in order of SPD (see the circles at the top). Faster units act more often. Tap End turn when you are done.</p>
   <p><b>Turn limit:</b> a spirit has a set number of its own turns (rocks give more, flowers fewer). After its last turn it leaves, and it cannot be confined again this battle.</p>
   <p><b>Free movement:</b> no grid. Move anywhere inside your blue circle; you can split movement before and after acting.</p>
-  <p><b>Lift & throw:</b> lift objects, allies or foes next to you, then throw them. Anything that lands outside the island is out of bounds and gone. Knockback can push foes off too.</p>
+  <p><b>Lift & throw:</b> lift objects, allies or foes next to you, then throw them. A unit that lands outside the island is out of bounds: it takes 30% of its max HP in damage and is put back on the edge. Objects that go out of bounds are lost. Knockback can push foes off too.</p>
   <p><b>Steal:</b> Lift a foe who is holding a weapon to try to take it. Faster units and Rogues succeed more often, and the foe loses its bonus.</p>
   <p><b>Equip:</b> Lift a weapon on the field to equip it for a new skill and stats. Items held at the end of the battle are kept.</p>
   <div class="row"><button class="pri" id="hc">Got it</button></div>`;
@@ -800,12 +813,12 @@ function genStage(d){
 }
 const STAGES = [
   {...STAGE1, id:'mossy', lv:3, col:'#5b8a44', island:ISLAND1, ground:['#5b8a44','#456f36','#7fae5a']},
-  genStage({id:'salt', name:'Saltreed Shore',  lv:4, conf:6, seed:11, objs:12, weapons:1, foes:6, pool:['Mossling','Thornbat'],                  boss:'Tide Grub',    col:'#c9b48a', ground:['#cdb98d','#a8915f','#e8d8ae']}),
-  genStage({id:'ember',name:'Ember Quarry',    lv:6, conf:6, seed:23, objs:12, weapons:2, foes:7, pool:['Mossling','Thornbat','Hexcap'],         boss:'Cinder Knight',col:'#b0603a', ground:['#9a5a3a','#7a4028','#c07a52']}),
-  genStage({id:'fen',  name:'Gloomwater Fen',  lv:8, conf:7, seed:37, objs:13, weapons:2, foes:7, pool:['Mossling','Hexcap','Thornbat'],         boss:'Bog Warden',   col:'#3f6a5a', ground:['#4a7a66','#2f5246','#6a9a86']}),
-  genStage({id:'bell', name:'Bellmoor Ruins',  lv:10,conf:7, seed:41, objs:13, weapons:2, foes:8, pool:['Hexcap','Thornbat','Mossling','GrubKnight'], boss:'Bell Tyrant', col:'#7a7a8a', ground:['#7f7f8f','#5a5a6a','#a0a0b0']}),
-  genStage({id:'glass',name:'Glasswind Steppe',lv:12,conf:8, seed:53, objs:14, weapons:3, foes:8, pool:['Thornbat','Hexcap','GrubKnight'],       boss:'Gale Lord',    col:'#a7c7d9', ground:['#a7c7d9','#7fa0b5','#d0e6f2']}),
-  genStage({id:'spire',name:'Ashen Spire',     lv:15,conf:8, seed:67, objs:14, weapons:3, foes:9, pool:['Hexcap','GrubKnight','Thornbat','Mossling'], boss:'The Ash King', col:'#5a4a5a', ground:['#5f4f5f','#3e323e','#8a7a8a']}),
+  genStage({id:'salt', name:'Saltreed Shore',  lv:4, conf:CONFINES, seed:11, objs:12, weapons:1, foes:6, pool:['Mossling','Thornbat'],                  boss:'Tide Grub',    col:'#c9b48a', ground:['#cdb98d','#a8915f','#e8d8ae']}),
+  genStage({id:'ember',name:'Ember Quarry',    lv:6, conf:CONFINES, seed:23, objs:12, weapons:2, foes:7, pool:['Mossling','Thornbat','Hexcap'],         boss:'Cinder Knight',col:'#b0603a', ground:['#9a5a3a','#7a4028','#c07a52']}),
+  genStage({id:'fen',  name:'Gloomwater Fen',  lv:8, conf:CONFINES, seed:37, objs:13, weapons:2, foes:7, pool:['Mossling','Hexcap','Thornbat'],         boss:'Bog Warden',   col:'#3f6a5a', ground:['#4a7a66','#2f5246','#6a9a86']}),
+  genStage({id:'bell', name:'Bellmoor Ruins',  lv:10,conf:CONFINES, seed:41, objs:13, weapons:2, foes:8, pool:['Hexcap','Thornbat','Mossling','GrubKnight'], boss:'Bell Tyrant', col:'#7a7a8a', ground:['#7f7f8f','#5a5a6a','#a0a0b0']}),
+  genStage({id:'glass',name:'Glasswind Steppe',lv:12,conf:CONFINES, seed:53, objs:14, weapons:3, foes:8, pool:['Thornbat','Hexcap','GrubKnight'],       boss:'Gale Lord',    col:'#a7c7d9', ground:['#a7c7d9','#7fa0b5','#d0e6f2']}),
+  genStage({id:'spire',name:'Ashen Spire',     lv:15,conf:CONFINES, seed:67, objs:14, weapons:3, foes:9, pool:['Hexcap','GrubKnight','Thornbat','Mossling'], boss:'The Ash King', col:'#5a4a5a', ground:['#5f4f5f','#3e323e','#8a7a8a']}),
 ];
 for (const s of STAGES) s.reward = s.reward || s.lv*150;
 const CHAPTERS = [['Chapter 1 · The Near Isles',[0,1,2]],['Chapter 2 · The Grey Reaches',[3,4,5]],['Chapter 3 · The Spire',[6]]];

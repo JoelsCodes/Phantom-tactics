@@ -5,7 +5,7 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 
 ## Stage 1: battle core (done)
 - Free movement, no grid: move anywhere inside your radius and split movement before/after acting.
-- Confine: the Warden fights alone and confines spirits into objects on the field. A spirit takes on the object's stat bonuses and its title. Each battle has a limited number of confines, and each spirit can be used once.
+- Confine: the Warden fights alone and confines spirits into objects on the field. A spirit takes on the object's stat bonuses and its title. Every stage allows 8 confines, and each spirit can be used once per battle.
 - Turn limits: each object gives a set number of turns (rock 6, tree 5, barrel 4, flower 3). When time runs out the spirit leaves, the object is used up, and held items drop.
 - Titles on units, objects and items change stats.
 - Lift & throw objects, allies and foes. Landing outside the island = out of bounds. Knockback skills can push foes off.
@@ -48,10 +48,11 @@ Checked against public descriptions of the original game (search summaries only,
 - Turns are now individual and ordered by SPD, not "your phase / enemy phase". A bar at the top of the field shows the next 8 turns. Only the active unit can be commanded; tap others to inspect them. The Turn counter counts the Warden's turns.
 - A spirit's turn limit counts its own turns. After its last turn it leaves, and it cannot be confined again that battle. A newly confined spirit acts right after the Warden's turn.
 - Lift does three things: equips a weapon on the ground, steals from an armed foe, or lifts anything else (which can then be thrown). The separate Equip button and the Rogue's Steal skill are gone; Rogues have Jab instead.
-- Still to check against the original: boss immunity to out-of-bounds, per-map confine caps, weight rules, EXP and level-up formulas, shop prices, fusion and title rules.
+- Set by the owner: out of bounds hurts but does not kill; 8 confines per map. The 30% damage is a guess.
+- Still to check against the original: boss immunity to out-of-bounds, weight rules, EXP and level-up formulas, shop prices, fusion and title rules.
 
 ## Planned stages
 5. More classes, skills, stages, random dungeons, post-game.
 
 ## Tests
-`NODE_PATH=$(npm root -g) node tests/battle.js` and `tests/hub.js`, `tests/progress.js`, `tests/shop.js`, `tests/archive.js` and `tests/turns.js` (headless Chromium at 390x800, screenshots in `tests/shots/`).
+`NODE_PATH=$(npm root -g) node tests/battle.js` and `tests/hub.js`, `tests/progress.js`, `tests/shop.js`, `tests/archive.js`, `tests/turns.js` and `tests/rules.js` (headless Chromium at 390x800, screenshots in `tests/shots/`).
