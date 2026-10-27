@@ -9,8 +9,8 @@ Inspired by the mechanics of classic free-roam tactics games. All names, charact
 - Turn limits: each object gives a set number of turns (rock 6, tree 5, barrel 4, flower 3). When time runs out the spirit leaves, the object is used up, and held items drop.
 - Titles on units, objects and items change stats.
 - Lift & throw objects, allies and foes. Landing outside the island (or being knocked past the edge) is out of bounds: a unit takes 30% of its max HP and is put back on the island edge, so it only dies if that hit is enough. Objects that go out of bounds are lost.
-- Lift a foe who is holding a weapon to try to steal it (any class; Rogues and Thief-titled units are better at it). It keeps its title and gives its skill to the thief.
-- Lift a weapon on the field to equip it. Items held at the end of a battle are kept (shown on the results screen).
+- Lift a foe who is holding a weapon to try to steal it (any class; Rogues and Thief-titled units are better at it). It keeps its title and gives its skill to the thief for the rest of the battle.
+- Lift a weapon on the field to equip it for the battle. See Loot below for what comes home.
 - Enemy AI, a boss, win/lose screens.
 
 ## Stage 2: island hub (done)
@@ -48,8 +48,15 @@ Checked against public descriptions of the original game (search summaries only,
 - Turns are now individual and ordered by SPD, not "your phase / enemy phase". A bar at the top of the field shows the next 8 turns. Only the active unit can be commanded; tap others to inspect them. The Turn counter counts the Warden's turns.
 - A spirit's turn limit counts its own turns. After its last turn it leaves, and it cannot be confined again that battle. A newly confined spirit acts right after the Warden's turn.
 - Lift does three things: equips a weapon on the ground, steals from an armed foe, or lifts anything else (which can then be thrown). The separate Equip button and the Rogue's Steal skill are gone; Rogues have Jab instead.
-- Set by the owner: out of bounds hurts but does not kill; 8 confines per map; weapons your team had equipped (including ones stolen from foes) that go out of bounds are put back on the character who held them after a win (a second lost item, or anything they picked up since, goes to storage). The 30% damage is a guess.
+- Set by the owner: out of bounds hurts but does not kill (the 30% damage is a guess); 8 confines per map; see Loot below.
 - Still to check against the original: boss immunity to out-of-bounds, weight rules, EXP and level-up formulas, shop prices, fusion and title rules.
+
+## Loot (set by the owner)
+- Picking up, equipping or stealing a weapon never brings it home.
+- The only way to bring a new weapon home: confine a spirit into it, then unconfine that spirit (its turns run out, or the battle ends while it is still out). Then there is a random chance (50%, a guess) the weapon comes home to storage, with its title.
+- A spirit that is defeated is not unconfined, so it gives no roll. Confining into a weapon you already own (one dropped by a character) gives no duplicate.
+- Weapons your characters set sail with always stay theirs, even if lost out of bounds, dropped or stolen. A loss changes nothing.
+- The confine preview tells you when the object can come home, and the results screen lists what was brought home and what slipped away.
 
 ## Planned stages
 5. More classes, skills, stages, random dungeons, post-game.

@@ -95,13 +95,13 @@ const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1 } 
   await p.click('#again');
   const back = await p.evaluate(() => ({ mode: MODE, gold: SAVE.gold, day: SAVE.day, items: SAVE.items.map(i => i.type).sort(), ys: SAVE.roster[1].item && SAVE.roster[1].item.type }));
   ok(back.mode === 'hub' && back.gold === g1 + 600 && back.day === 2, 'back on the island with 600 Bordin, day 2');
-  ok(back.ys === 'sword' && back.items.join() === 'bow,staff,sword,sword', 'Ysolde keeps her sword; field weapons go to storage (' + back.items + ')');
+  ok(back.ys === 'sword' && back.items.length === 0, 'Ysolde keeps her sword; weapons lying on the field do not come home (' + back.items + ')');
 
   // Save persists across a reload.
   await p.goto(base + '?fast');
   await p.waitForTimeout(300);
   const re = await p.evaluate(() => ({ day: SAVE.day, items: SAVE.items.length, b: SAVE.roster[0].title }));
-  ok(re.day === 2 && re.items === 4 && re.b === '', 'save survives a reload');
+  ok(re.day === 2 && re.items === 0 && re.b === '', 'save survives a reload');
   await p.screenshot({ path: out + '/hub-6.png' });
   ok(errs.length === 0, 'no page errors' + (errs.length ? ': ' + errs.join(' | ') : ''));
   await b.close();

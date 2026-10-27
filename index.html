@@ -206,7 +206,7 @@ const maxSP = u => 6 + Math.round(stat(u,'int')*0.6);
 function skills(u){const s=[...CL[u.cls].sk];if(u.held&&OT[u.held.type].skill&&!s.includes(OT[u.held.type].skill))s.push(OT[u.held.type].skill);return s}
 const alive = u => ents.includes(u);
 // Unit from a saved character (roster entry or the Warden); its item comes along.
-function charUnit(c,extra){const u=mkUnit({...c,held:c.item?.type,heldTitle:c.item?.title,heldTier:c.item?.tier||0,...extra});u.rid=c.id;if(u.held&&u.team==='p'){u.held.mine=true;u.held.holder=u.rid}return u}
+function charUnit(c,extra){const u=mkUnit({...c,held:c.item?.type,heldTitle:c.item?.title,heldTier:c.item?.tier||0,...extra});u.rid=c.id;if(u.held&&u.team==='p')u.held.mine=true;return u}
 
 function newBattle(st=STAGES[0]){
   STAGE = st; ISLAND = st.island; DECOR = mkDecor();
@@ -218,7 +218,7 @@ function newBattle(st=STAGES[0]){
   for (const [t,x,y,ti] of STAGE.objs) ents.push(mkObj(t,x,y,ti||''));
   for (const f of STAGE.foes) ents.push(mkUnit({...f,team:'e'}));
   G = {turn:0,time:0,act:null,phase:'player',confLeft:STAGE.conf,used:{},sel:null,mode:'idle',pending:null,over:null,
-       stats:{confined:0,ob:0,stolen:0,defeated:0},log:[],exp:{},expDone:0,ups:[],lost:[]};
+       stats:{confined:0,ob:0,stolen:0,defeated:0},log:[],exp:{},expDone:0,ups:[],keep:[],gone:[]};
   cam.x = h.x+90; cam.y = h.y-40; camT = null;
   $('#ov').classList.remove('on');
   initQueue(); advance();
@@ -277,6 +277,15 @@ function tween(ms,f){return new Promise(res=>{anims.push({t0:performance.now(),m
 function popup(x,y,s,col='#fff'){fx.push({type:'txt',x,y,s,col,t0:performance.now(),ms:1000*Math.max(FAST,.3)})}
 async function banner(s){G.banner={s,t0:performance.now()};await wait(900);G.banner=null}
 
+// The only way to come home with a new weapon: confine a spirit into it, then unconfine it (its turns run out, or the
+// battle ends with it still out). Then there is a random chance the weapon comes home. Picking one up never does.
+const KEEP_CHANCE = 0.5;
+function unconfineRoll(u){
+  const o = u.obj; if (!o || !OT[o.type].equip || o.mine) return;
+  const it = {type:o.type,title:o.title,tier:o.tier||0};
+  if (Math.random() < KEEP_CHANCE){G.keep.push(it); popup(u.x,u.y,'Kept '+OT[o.type].n+'!','#ffcf5b'); log(itemName(it)+' will come home with you')}
+  else {G.gone.push(it); log(itemName(it)+' slipped away')}
+}
 // ===================== TURNS =====================
 // Individual turns ordered by SPD, like the original: a unit's next turn comes 100/SPD after its last one.
 const turnGap = u => 100/stat(u,'spd');
@@ -314,7 +323,7 @@ async function endTurn(){
   G.mode = 'idle'; G.pending = null;
   if (u && alive(u)){
     u.t = Math.max(u.t,G.time) + turnGap(u);
-    if (u.team==='p' && !u.host){u.turns--; if (u.turns<=0) removeUnit(u,'returned to the spirit realm')}
+    if (u.team==='p' && !u.host){u.turns--; if (u.turns<=0){unconfineRoll(u); removeUnit(u,'returned to the spirit realm')}}
   }
   return advance();
 }
@@ -406,9 +415,8 @@ async function fallOut(e,src){
     log(e.name+' was knocked out of bounds and back onto the island');
   } else {
     ents.splice(ents.indexOf(e),1);
-    // Weapons your team had equipped are lost for this battle but go back on whoever held them when it ends.
-    if (e.mine){G.lost.push({type:e.type,title:e.title,tier:e.tier||0,holder:e.holder}); log(itemName(e)+' fell out of bounds. It will be returned after the battle.')}
-    else log(OT[e.type].n+' fell out of bounds');
+    // A weapon a character set sail with stays theirs, even if it is lost in the battle.
+    log(e.mine ? itemName(e)+' fell out of bounds. It stays yours.' : OT[e.type].n+' fell out of bounds');
   }
 }
 function calcDmg(a,d,s){
@@ -452,7 +460,6 @@ async function stealFrom(u,t){
   if (!t.held){popup(t.x,t.y,'Nothing to steal','#ccc')}
   else if (Math.random()*100 < stealChance(u,t)){
     const it=t.held; t.held=null; t.hp=Math.min(t.hp,stat(t,'hp'));
-    if (u.team==='p'){it.mine=true;it.holder=u.rid}
     if (!u.held){u.held=it}else{const p=findFree(u.x+14,u.y,it);if(p){it.x=p[0];it.y=p[1];ents.push(it)}}
     G.stats.stolen++; popup(t.x,t.y,'Stole '+OT[it.type].n+'!','#ffcf5b'); log(u.name+' stole '+itemName(it));
   } else popup(t.x,t.y,'Steal failed','#ccc');
@@ -461,7 +468,6 @@ async function stealFrom(u,t){
 function equipFrom(u,w){
   ents.splice(ents.indexOf(w),1);
   if (u.held){const it=u.held;const p=findFree(u.x+12,u.y+4,it);it.x=p?p[0]:u.x;it.y=p?p[1]:u.y;ents.push(it)}
-  if (u.team==='p'){w.mine=true;w.holder=u.rid}
   u.held=w; u.sp=Math.min(u.sp,maxSP(u)); log(u.name+' equipped '+itemName(w));
 }
 function canLift(u,e){
@@ -583,6 +589,7 @@ function ui(){
   else if (G.pending){
     const o=G.pending, sp=G.pendingSpirit, prev=charUnit(sp,{team:'p'}); prev.obj=o; prev.hp=stat(prev,'hp'); prev.sp=maxSP(prev);
     P.push(`<div class="mut">Preview: ${sp.name} confined into ${o.title?o.title+' ':''}${OT[o.type].n}</div>`+unitInfo({...prev,turns:OT[o.type].turns+(o.title==='Elder'?1:0)}));
+    if (OT[o.type].equip && !o.mine) P.push(`<div class="hint">When ${sp.name} is unconfined, there is a ${Math.round(KEEP_CHANCE*100)}% chance this ${OT[o.type].n} comes home with you.</div>`);
     P.push(`<div class="row"><button class="pri" data-a="doConf">Confine here</button><button data-a="cancel">Pick another</button></div>`);
   }
   else if (u && u.k==='unit'){
@@ -645,13 +652,15 @@ $('#sheet').addEventListener('click', e => {
 });
 function showEnd(){
   const win=G.over==='win';
-  const spoils=lootList().map(itemName);
-  if (!G.expDone){G.expDone=1;G.ups=applyExp(win)}
+  if (!G.expDone){
+    G.expDone=1; G.ups=applyExp(win);
+    if (win) for (const u of units('p')) if (!u.host) unconfineRoll(u);   // spirits still out when the battle ends are unconfined
+  }
   const expTxt=G.ups.length?'<p>'+G.ups.map(u=>`${u.name} +${u.gain} EXP${u.to>u.from?` <b class="up">Lv ${u.from} → ${u.to}!</b>`:''}`).join('<br>')+'</p>':'';
   $('#ovIn').innerHTML = `<h2>${win?'Stage Clear!':'Defeat'}</h2>
     <p>${win?'All foes are gone from '+STAGE.name+'.':'Your Warden has fallen.'}</p>
     <p class="mut">Turns: ${G.turn} · Spirits confined: ${G.stats.confined} · Foes defeated: ${G.stats.defeated} · Sent out of bounds: ${G.stats.ob} · Items stolen: ${G.stats.stolen}</p>
-    ${win?`<p>Reward: <b style="color:var(--gd)">${STAGE.reward} Bordin</b></p><p>Spoils carried home: ${spoils.length?spoils.join(', '):'<span class="mut">none</span>'}</p>${G.lost.length?`<p>Returned from out of bounds: ${G.lost.map(l=>itemName(l)+(charById(l.holder)?' → '+charById(l.holder).name:'')).join(', ')}</p>`:''}`:'<p class="mut">Your spirits and items are as they were before you set sail. EXP earned is kept; herbs and tonics you used are gone.</p>'}
+    ${win?`<p>Reward: <b style="color:var(--gd)">${STAGE.reward} Bordin</b></p>${G.keep.length?`<p>Brought home: <b style="color:var(--gd)">${G.keep.map(itemName).join(', ')}</b></p>`:''}${G.gone.length?`<p class="mut">Slipped away: ${G.gone.map(itemName).join(', ')}</p>`:''}${G.keep.length||G.gone.length?'':'<p class="mut">No new weapons came home. Confine a spirit into a weapon for a chance to keep it.</p>'}`:'<p class="mut">Your spirits and items are as they were before you set sail. EXP earned is kept; herbs and tonics you used are gone.</p>'}
     ${expTxt}<div class="row"><button class="pri" id="again">Return to the island</button></div>`;
   $('#ov').classList.add('on'); $('#again').onclick = settle;
 }
@@ -663,7 +672,7 @@ function showHelp(){
   <p><b>Free movement:</b> no grid. Move anywhere inside your blue circle; you can split movement before and after acting.</p>
   <p><b>Lift & throw:</b> lift objects, allies or foes next to you, then throw them. A unit that lands outside the island is out of bounds: it takes 30% of its max HP in damage and is put back on the edge. Objects that go out of bounds are lost, except weapons your team had equipped: those go back on the character who held them when you win. Knockback can push foes off too.</p>
   <p><b>Steal:</b> Lift a foe who is holding a weapon to try to take it. Faster units and Rogues succeed more often, and the foe loses its bonus.</p>
-  <p><b>Equip:</b> Lift a weapon on the field to equip it for a new skill and stats. Items held at the end of the battle are kept.</p>
+  <p><b>Weapons:</b> Lift a weapon on the field to equip it for a new skill and stats, but you can't take it home that way. To bring a weapon home, confine a spirit into it: when that spirit is unconfined (its turns run out, or the battle ends), there is a 50% chance the weapon comes with you. What your characters set sail with always stays theirs.</p>
   <div class="row"><button class="pri" id="hc">Got it</button></div>`;
   $('#ov').classList.add('on'); $('#hc').onclick=()=>{$('#ov').classList.remove('on');if(G.over)showEnd()};
 }
@@ -908,32 +917,14 @@ function loadSave(){
   return newSave();
 }
 function save(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(SAVE))}catch(e){}}
-const charById = id => id===0 ? SAVE.host : SAVE.roster.find(r=>r.id===id);
 const itemName = it => (it.title?it.title+' ':'')+OT[it.type].n+(it.tier?' +'+it.tier:'');
 const ROSTER_MAX = 20;
 
-// Weapons held by your units or left on the field come home after a win.
-function lootList(){
-  const L = [];
-  for (const u of units('p')) if (u.held) L.push({u, type:u.held.type, title:u.held.title, tier:u.held.tier||0});
-  for (const o of objs()) if (OT[o.type].equip) L.push({type:o.type, title:o.title, tier:o.tier||0});
-  return L;
-}
 function settle(){
   if (G.over==='win'){
     SAVE.gold += STAGE.reward;
-    SAVE.host.item = null;
-    for (const r of SAVE.roster) if (G.used[r.id]) r.item = null;
-    // Lost weapons go back on their holder first (one each); anything else they ended up with, or a second lost item, goes to storage.
-    for (const l of G.lost){
-      const it = {id:SAVE.nid++, type:l.type, title:l.title, tier:l.tier||0}, c = charById(l.holder);
-      if (c && !c.item) c.item = it; else SAVE.items.push(it);
-    }
-    for (const l of lootList()){
-      const it = {id:SAVE.nid++, type:l.type, title:l.title, tier:l.tier||0};
-      const owner = l.u && (l.u.host ? SAVE.host : SAVE.roster.find(r=>r.id===l.u.rid));
-      if (owner && !owner.item) owner.item = it; else SAVE.items.push(it);
-    }
+    // Characters keep what they set sail with. New weapons only come home through the unconfine roll.
+    for (const k of G.keep) SAVE.items.push({id:SAVE.nid++, type:k.type, title:k.title, tier:k.tier});
   }
   SAVE.day++; save();
   toHub(BLD.find(b=>b.id==='ferry'));

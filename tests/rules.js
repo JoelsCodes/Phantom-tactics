@@ -52,47 +52,85 @@ const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1 } 
     await fallOut(r); return { n, after: objs().length, has: objs().includes(r) };
   });
   ok(!o.has && o.after === o.n - 1, 'an object that goes out of bounds is lost');
-  // Equipped items that go out of bounds come back to storage after a win; ground weapons nobody on your team held do not.
-  const r = await p.evaluate(async () => {
+  // ---- Loot rules: only confine-then-unconfine can bring a new weapon home. ----
+  const battle = (setup) => p.evaluate(async (setup) => {
+    SAVE.items = []; for (const r of SAVE.roster) r.item = null; SAVE.host.item = null;
+    eval(setup);
     newBattle(); await new Promise(r => setTimeout(r, 100));
-    SAVE.roster[0].item = { id: SAVE.nid++, type: 'axe', title: 'Fierce', tier: 2 }; SAVE.items = [];
-    newBattle(); await new Promise(r => setTimeout(r, 100));
-    const y = confine(ROSTER[0], objs().find(o => !OT[o.type].equip)), axe = y.held;
-    y.held = null; axe.x = 40; axe.y = 100; ents.push(axe);
-    await fallOut(axe, y);                                   // equipped by your team: returns
-    const wild = objs().find(o => OT[o.type].equip && !o.mine); await fallOut(wild);   // never yours: gone
-    const stolen = units('e').find(e => e.held), thief = y;
-    const sw = stolen.held; stolen.held = null; thief.held = sw; sw.mine = true; sw.holder = thief.rid; thief.held = null; sw.x = 40; sw.y = 100; ents.push(sw);
-    await fallOut(sw, y);                                    // stolen then lost: returns
-    return { lost: G.lost.map(l => l.type + ':' + l.title + ':' + l.tier), wildType: wild.type, swType: sw.type };
+  }, setup);
+  const win = () => p.evaluate(() => { for (const e of units('e')) removeUnit(e); checkEnd(); const t = document.querySelector('#ovIn').textContent; document.querySelector('#again').click(); return t });
+  const store = () => p.evaluate(() => SAVE.items.map(i => i.type + ':' + i.title + ':' + (i.tier || 0)));
+
+  // 1. A weapon a character set sail with stays theirs even if it is lost out of bounds.
+  await battle("SAVE.roster[0].item = { id: SAVE.nid++, type: 'axe', title: 'Fierce', tier: 2 }");
+  await p.evaluate(async () => {
+    const y = confine(ROSTER[0], objs().find(o => !OT[o.type].equip)), axe = y.held; y.held = null; axe.x = 40; axe.y = 100; ents.push(axe);
+    await fallOut(axe, y);
   });
-  ok(r.lost.includes('axe:Fierce:2') && r.lost.length === 2 && !r.lost.some(l => l.startsWith(r.wildType + ':') && l !== r.lost[1]), 'only items your team equipped are marked for return (' + r.lost.join(', ') + ')');
-  await p.evaluate(() => { for (const e of units('e')) removeUnit(e); checkEnd() });
-  ok(await p.evaluate(() => /Returned from out of bounds/.test(document.querySelector('#ovIn').textContent)), 'results screen lists what was returned');
-  await p.click('#again');
-  const back = await p.evaluate(() => ({ held: SAVE.roster[0].item && SAVE.roster[0].item.type + ':' + SAVE.roster[0].item.title + ':' + SAVE.roster[0].item.tier, store: SAVE.items.map(i => i.type) }));
-  ok(back.held === 'axe:Fierce:2', 'the lost axe is back on the spirit who held it, with its title and tier (' + back.held + ')');
-  ok(back.store.includes(r.swType) && !back.store.includes('axe'), 'a second lost item for the same spirit goes to storage (' + back.store.join(', ') + ')');
-  // A spirit that lost its weapon and then picked up another: the original goes back on, the pickup goes to storage.
-  const sw = await p.evaluate(async () => {
-    SAVE.roster[1].item = { id: SAVE.nid++, type: 'spear', title: 'Swift', tier: 1 }; SAVE.items = [];
-    newBattle(); await new Promise(r => setTimeout(r, 100));
-    const y = confine(ROSTER[1], objs().find(o => !OT[o.type].equip)), sp = y.held; y.held = null; sp.x = 40; sp.y = 100; ents.push(sp);
-    await fallOut(sp, y);
-    const ground = objs().find(o => OT[o.type].equip); equipFrom(y, ground);
-    for (const e of units('e')) removeUnit(e); checkEnd(); document.querySelector('#again').click();
-    return { held: SAVE.roster[1].item && SAVE.roster[1].item.type + ':' + SAVE.roster[1].item.title + ':' + SAVE.roster[1].item.tier, store: SAVE.items.map(i => i.type), picked: ground.type };
+  await win();
+  ok(await p.evaluate(() => { const i = SAVE.roster[0].item; return i && i.type === 'axe' && i.title === 'Fierce' && i.tier === 2 }) && (await store()).length === 0, 'a weapon you set sail with stays on its character, even if lost out of bounds');
+
+  // 2. Picking up (or stealing) a weapon never brings it home, even if still held at the end.
+  await battle("");
+  const t2 = await p.evaluate(async () => {
+    Math.random = () => 0;
+    const y = confine(ROSTER[1], objs().find(o => !OT[o.type].equip)), w = objs().find(o => OT[o.type].equip);
+    equipFrom(y, w);
+    const hx = units('e').find(e => e.held), it = hx.held; hx.held = null; ents.push(it); it.x = y.x + 12; it.y = y.y; 
+    ROSTER[2] && confine(ROSTER[2], objs().filter(o => !OT[o.type].equip)[0]);
+    return { held: y.held && y.held.type };
   });
-  ok(sw.held === 'spear:Swift:1' && sw.store.includes(sw.picked), 'lost weapon goes back on; the weapon picked up afterwards goes to storage (' + sw.held + ' / ' + sw.store.join(', ') + ')');
-  // On a loss nothing is taken from the save at all.
-  const loss = await p.evaluate(async () => {
-    SAVE.roster[0].item = { id: SAVE.nid++, type: 'spear', title: '', tier: 0 };
-    newBattle(); await new Promise(r => setTimeout(r, 100));
-    const y = confine(ROSTER[0], objs().find(o => !OT[o.type].equip)), sp = y.held; y.held = null; sp.x = 40; sp.y = 100; ents.push(sp);
-    await fallOut(sp, y); removeUnit(host()); checkEnd(); document.querySelector('#again').click();
-    return SAVE.roster[0].item && SAVE.roster[0].item.type;
+  const txt2 = await win();
+  ok(t2.held && (await store()).length === 0 && /No new weapons came home/.test(txt2), 'a weapon picked up on the field is not brought home, even when still held at the end');
+
+  // 3. Confine into a weapon, then unconfine when its turns run out: random chance (forced to succeed here).
+  await battle("");
+  const t3 = await p.evaluate(async () => {
+    Math.random = () => 0;
+    const w = objs().find(o => OT[o.type].equip && o.title) || objs().find(o => OT[o.type].equip), type = w.type, title = w.title;
+    const y = confine(ROSTER[0], w);
+    y.turns = 1; G.act = y; G.phase = 'player'; busy = false;
+    await endTurn();
+    return { gone: !alive(y), keep: G.keep.map(k => k.type + ':' + k.title), want: type + ':' + title };
   });
-  ok(loss === 'spear', 'after a loss the spirit still owns its spear');
+  ok(t3.gone && t3.keep[0] === t3.want, 'confined into a weapon and unconfined: it is brought home with its title (' + t3.want + ')');
+  await win();
+  ok((await store()).includes(t3.want + ':0'), 'the weapon is in storage after the win');
+
+  // 4. A failed roll loses the weapon.
+  await battle("");
+  const t4 = await p.evaluate(async () => {
+    Math.random = () => 0.99;
+    const w = objs().find(o => OT[o.type].equip), y = confine(ROSTER[0], w);
+    y.turns = 1; G.act = y; G.phase = 'player'; busy = false;
+    await endTurn();
+    return { keep: G.keep.length, gone: G.gone.length };
+  });
+  const txt4 = await win();
+  ok(t4.keep === 0 && t4.gone === 1 && (await store()).length === 0 && /Slipped away/.test(txt4), 'a failed roll: the weapon slips away');
+
+  // 5. A spirit still confined into a weapon when you win is unconfined then, and rolls too.
+  await battle("");
+  await p.evaluate(async () => { Math.random = () => 0; confine(ROSTER[0], objs().find(o => OT[o.type].equip)) });
+  const txt5 = await win();
+  ok((await store()).length === 1 && /Brought home/.test(txt5), 'a spirit still out at the end of the battle rolls for its weapon');
+
+  // 6. A defeated spirit is not unconfined: no roll. Confining into a weapon you already own gives no duplicate.
+  await battle("SAVE.roster[1].item = { id: SAVE.nid++, type: 'sword', title: '', tier: 0 }");
+  await p.evaluate(async () => {
+    Math.random = () => 0;
+    const w = objs().find(o => OT[o.type].equip), y = confine(ROSTER[0], w);
+    damage(y, 9999, units('e')[0]);
+    const z = confine(ROSTER[1], objs().filter(o => !OT[o.type].equip)[0]), own = z.held; z.held = null; own.x = z.x + 10; own.y = z.y; ents.push(own);
+    confine(ROSTER[2], own);
+  });
+  await win();
+  ok((await store()).length === 0 && await p.evaluate(() => SAVE.roster[1].item.type === 'sword'), 'a defeated spirit gives no roll, and confining into your own dropped weapon makes no duplicate');
+
+  // 7. A loss changes nothing.
+  await battle("SAVE.roster[0].item = { id: SAVE.nid++, type: 'spear', title: '', tier: 0 }");
+  await p.evaluate(async () => { Math.random = () => 0; confine(ROSTER[1], objs().find(o => OT[o.type].equip)); removeUnit(host()); checkEnd(); document.querySelector('#again').click() });
+  ok((await store()).length === 0 && await p.evaluate(() => SAVE.roster[0].item.type === 'spear'), 'after a loss nothing is gained or lost');
   ok(errs.length === 0, 'no page errors' + (errs.length ? ': ' + errs.join(' | ') : ''));
   await b.close();
 })();
