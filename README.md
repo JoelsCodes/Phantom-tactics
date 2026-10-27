@@ -54,4 +54,4 @@ Checked against public descriptions of the original game (search summaries only,
 5. More classes, skills, stages, random dungeons, post-game.
 
 ## Tests
-`NODE_PATH=$(npm root -g) node tests/battle.js` and `tests/hub.js` (headless Chromium at 390x800, screenshots in `tests/shots/`).
+`NODE_PATH=$(npm root -g) node tests/battle.js` and `tests/hub.js`, `tests/progress.js`, `tests/shop.js`, `tests/archive.js` and `tests/turns.js` (headless Chromium at 390x800, screenshots in `tests/shots/`).
